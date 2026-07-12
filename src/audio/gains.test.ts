@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   anySoloed,
+  clampTrackVolume,
   clampVolume,
   effectiveGain,
   resolveEffectiveGains,
@@ -25,6 +26,14 @@ describe('clampVolume', () => {
   });
 });
 
+describe('clampTrackVolume', () => {
+  it('allows stem gain up to 150%', () => {
+    expect(clampTrackVolume(-0.5)).toBe(0);
+    expect(clampTrackVolume(1.25)).toBe(1.25);
+    expect(clampTrackVolume(2)).toBe(1.5);
+  });
+});
+
 describe('anySoloed', () => {
   it('detects a soloed track', () => {
     expect(anySoloed([track({ id: 'a' }), track({ id: 'b', soloed: true })])).toBe(true);
@@ -35,6 +44,9 @@ describe('anySoloed', () => {
 describe('effectiveGain', () => {
   it('returns volume when no solo is active', () => {
     expect(effectiveGain(track({ id: 'a', volume: 0.7 }), false)).toBeCloseTo(0.7);
+  });
+  it('allows a track to play above unity gain', () => {
+    expect(effectiveGain(track({ id: 'a', volume: 1.5 }), false)).toBe(1.5);
   });
   it('mutes override volume', () => {
     expect(effectiveGain(track({ id: 'a', volume: 0.7, muted: true }), false)).toBe(0);

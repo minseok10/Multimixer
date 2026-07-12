@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local `wrangler dev` only. Never commit the real value.
+ADMIN_PASSWORD=replace-with-a-strong-password

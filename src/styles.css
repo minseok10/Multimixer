@@ -36,10 +36,162 @@ body {
   font-size: 22px;
   letter-spacing: 0.5px;
 }
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.back-library {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--accent);
+  border-radius: 7px;
+  padding: 7px 11px;
+  cursor: pointer;
+}
 .tagline {
   margin: 4px 0 16px;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* Song library ------------------------------------------------------------- */
+.library {
+  margin-top: 22px;
+}
+.library-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+.library-heading h2,
+.admin-upload h3 {
+  margin: 0;
+}
+.library-heading p,
+.admin-upload p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+.song-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.song-card {
+  position: relative;
+  min-height: 138px;
+  border: 1px solid var(--border);
+  background: linear-gradient(145deg, var(--panel-2), var(--panel));
+  border-radius: 12px;
+  overflow: hidden;
+}
+.song-select,
+.custom-song {
+  width: 100%;
+  min-height: 138px;
+  padding: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.song-card:hover {
+  border-color: var(--accent-dim);
+}
+.song-select:disabled,
+.custom-song:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.song-number {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  color: var(--accent);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+.song-name {
+  font-size: 17px;
+  font-weight: 700;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.song-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+.custom-song {
+  border: 1px dashed transparent;
+}
+.custom-plus {
+  position: absolute;
+  top: 12px;
+  right: 15px;
+  color: var(--accent);
+  font-size: 30px;
+}
+.song-delete {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  border: 1px solid var(--danger);
+  background: rgba(15, 17, 21, 0.88);
+  color: var(--danger);
+  border-radius: 5px;
+  padding: 4px 7px;
+  cursor: pointer;
+}
+.storage-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.admin-upload {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+}
+.admin-upload-heading {
+  grid-column: 1 / -1;
+}
+.admin-upload label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.admin-upload input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px;
 }
 
 /* Transport ---------------------------------------------------------------- */
@@ -415,6 +567,16 @@ body {
 }
 
 @media (max-width: 640px) {
+  .library-heading,
+  .storage-summary {
+    flex-direction: column;
+  }
+  .admin-upload {
+    grid-template-columns: 1fr;
+  }
+  .admin-upload-heading {
+    grid-column: auto;
+  }
   .track-row {
     grid-template-columns: 1fr;
   }

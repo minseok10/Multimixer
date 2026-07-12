@@ -8,6 +8,7 @@ import { memo, useCallback } from 'react';
 import { Waveform } from './Waveform';
 import { Meter } from './Meter';
 import { engine } from '../state/useEngine';
+import { MAX_TRACK_VOLUME } from '../audio/gains';
 import type { LoopRegion, TrackState } from '../audio/types';
 
 interface Props {
@@ -72,7 +73,7 @@ function TrackRowImpl({
             className="volume"
             type="range"
             min={0}
-            max={1}
+            max={MAX_TRACK_VOLUME}
             step={0.01}
             value={track.volume}
             onChange={(e) => onVolume(track.id, Number(e.target.value))}

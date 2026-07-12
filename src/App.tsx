@@ -11,25 +11,35 @@ import { engine, useEngineState } from './state/useEngine';
 import { Transport } from './components/Transport';
 import { TrackRow } from './components/TrackRow';
 import { DropZone } from './components/DropZone';
+import { SongLibrary } from './components/SongLibrary';
 import { buildDemoStems } from './audio/demoStems';
 import { renderMix, encodeWav } from './audio/mixdown';
 import { readBpm } from './audio/readBpm';
 import type { LoopRegion } from './audio/types';
+import { fetchSongDetail, type Song } from './library';
 
 export default function App() {
   const state = useEngineState();
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<'library' | 'mixer'>('library');
 
   const hasTracks = state.tracks.length > 0;
   // While playing the playhead is driven by rAF, so this sentinel keeps track
   // rows from re-rendering; while paused it carries the real position.
   const pausedPosition = state.isPlaying ? -1 : engine.currentTime;
 
-  const onPlayPause = useCallback(() => {
+  const onPlayPause = useCallback(async () => {
     if (engine.isPlaying) engine.pause();
-    else void engine.play();
+    else {
+      try {
+        setError(null);
+        await engine.play();
+      } catch (e) {
+        setError(`재생 실패: ${(e as Error).message}`);
+      }
+    }
   }, []);
   const onStop = useCallback(() => engine.stop(), []);
   const onVolume = useCallback((id: string, v: number) => engine.setVolume(id, v), []);
@@ -42,7 +52,6 @@ export default function App() {
   }, []);
   const onSetLoop = useCallback((region: LoopRegion) => {
     engine.setLoop(region);
-    engine.setLoopEnabled(true);
   }, []);
   const onToggleLoop = useCallback(() => {
     engine.setLoopEnabled(!engine.getSnapshot().loopEnabled);
@@ -67,6 +76,42 @@ export default function App() {
     engine.setMetronomeEnabled(!engine.getSnapshot().metronomeEnabled);
   }, []);
   const onMetronomeVolume = useCallback((v: number) => engine.setMetronomeVolume(v), []);
+
+  const onSelectSong = useCallback(async (song: Song) => {
+    setError(null);
+    setLoading(true);
+    try {
+      // Resume synchronously from the click gesture before the network wait.
+      await engine.resume();
+      const detail = await fetchSongDetail(song);
+      engine.clear();
+      const downloaded = await Promise.all(detail.stems.map(async (stem) => {
+        const response = await fetch(stem.url);
+        if (!response.ok) throw new Error(`${stem.name} 스템을 내려받지 못했습니다.`);
+        const blob = await response.blob();
+        return { stem, blob, data: await blob.arrayBuffer() };
+      }));
+      await engine.loadFiles(downloaded.map(({ stem, data }) => ({ name: stem.name, data })));
+      if (detail.bpm) engine.setMetronomeBpm(detail.bpm, true);
+      setView('mixer');
+    } catch (e) {
+      setError(`노래 로드 실패: ${(e as Error).message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const onCustomUpload = useCallback(() => {
+    engine.clear();
+    setError(null);
+    setView('mixer');
+  }, []);
+
+  const onBackToLibrary = useCallback(() => {
+    engine.clear();
+    setError(null);
+    setView('library');
+  }, []);
 
   const onLoadDemo = useCallback(async () => {
     setError(null);
@@ -128,11 +173,24 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Multimixer</h1>
+        <div className="header-row">
+          <h1>Multimixer</h1>
+          {view === 'mixer' && (
+            <button className="back-library" onClick={onBackToLibrary}>← 노래 선택</button>
+          )}
+        </div>
         <p className="tagline">
           단일 오디오 클럭으로 모든 트랙을 샘플 단위 동기 재생 — 드리프트·위상 어긋남 없음
         </p>
       </header>
+
+      {view === 'library' ? (
+        <>
+          {error && <div className="error-banner">{error}</div>}
+          <SongLibrary busy={loading} onSelectSong={onSelectSong} onCustomUpload={onCustomUpload} />
+        </>
+      ) : (
+        <>
 
       <Transport
         isPlaying={state.isPlaying}
@@ -186,6 +244,8 @@ export default function App() {
         loading={loading}
         compact={hasTracks}
       />
+        </>
+      )}
     </div>
   );
 }

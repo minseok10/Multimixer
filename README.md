@@ -74,3 +74,27 @@ docs/           # Claude Code ↔ Codex 협업 가이드
 
 두 AI 도구(Claude Code, Codex)로 함께 개발하기 위한 경계선과 규칙은
 [`docs/COLLABORATION.md`](docs/COLLABORATION.md)를 참고하세요.
+
+## Cloudflare 배포와 노래 라이브러리
+
+첫 화면의 노래 라이브러리는 Cloudflare R2의 `multimixer-songs` 버킷을 사용합니다. 노래 하나는
+여러 오디오 스템을 묶은 단위이며, 관리 화면에서 WAV 4개 등을 한 번에 선택해 올릴 수 있습니다.
+모든 스템 업로드가 끝난 노래만 공개 목록에 표시됩니다. 공개 사용자는 목록을 보고 음원을 재생할 수
+있지만, 업로드와 삭제는 `ADMIN_PASSWORD` Worker Secret이 있어야만 가능합니다. 비밀번호는
+`wrangler.jsonc`나 Git에 저장하지 않습니다.
+
+안전 한도는 Worker에서도 강제합니다.
+
+- 스템당 최대 95 MiB (각 스템을 별도 요청으로 보내 Workers 요청 본문 100 MB 한도 아래 유지)
+- 노래당 2~16개 스템
+- 라이브러리 전체 최대 8 GiB (R2 Standard 무료 10 GB-month 아래에 여유 확보)
+- 최대 200곡
+
+로컬 개발은 `.dev.vars.example`을 `.dev.vars`로 복사한 뒤 비밀번호를 바꿔 사용합니다. 실제 배포는
+R2를 활성화하고 버킷을 만든 다음 Secret을 설정합니다.
+
+```bash
+npx wrangler r2 bucket create multimixer-songs
+npx wrangler secret put ADMIN_PASSWORD
+npm run deploy
+```

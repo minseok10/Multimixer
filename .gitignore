@@ -1,7 +1,15 @@
 node_modules
 dist
 dist-ssr
+.wrangler
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.dev.vars.example
+!.env.example
 *.local
 .DS_Store
 *.log
+*.cpuprofile
 *.tsbuildinfo

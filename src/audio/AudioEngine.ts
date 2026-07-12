@@ -19,7 +19,7 @@
  * via subscribe()/getSnapshot() (React binds with useSyncExternalStore).
  */
 
-import { resolveEffectiveGains, clampVolume, type GainInput } from './gains';
+import { resolveEffectiveGains, clampTrackVolume, clampVolume, type GainInput } from './gains';
 import { createLimiter } from './limiter';
 import { buildMetronomeBuffer, METRONOME_SAMPLE_RATE } from './metronome';
 import { computePeaks } from './peaks';
@@ -107,6 +107,10 @@ export class AudioEngine {
 
   private getContext(): AudioContext {
     if (this.ctx) return this.ctx;
+    const audioSession = (navigator as Navigator & {
+      audioSession?: { type: 'auto' | 'playback' | 'transient' | 'transient-solo' | 'ambient' | 'play-and-record' };
+    }).audioSession;
+    if (audioSession) audioSession.type = 'playback';
     const Ctor =
       window.AudioContext ??
       (window as unknown as { webkitAudioContext: typeof AudioContext })
@@ -142,7 +146,19 @@ export class AudioEngine {
   /** Must be called from a user gesture before audio can start. */
   async resume(): Promise<void> {
     const ctx = this.getContext();
-    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state !== 'running') {
+      // iOS Safari can report a resumed context while its output remains
+      // gesture-locked. Queueing a silent source synchronously in the tap that
+      // called this method reliably primes the hardware audio output.
+      const source = ctx.createBufferSource();
+      source.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      source.connect(ctx.destination);
+      source.start(0);
+      await ctx.resume();
+    }
+    if ((ctx.state as string) !== 'running') {
+      throw new Error('오디오 출력을 시작하지 못했습니다. iPhone의 무음 모드를 해제하고 다시 눌러주세요.');
+    }
   }
 
   // ---- Loading -----------------------------------------------------------
@@ -154,6 +170,15 @@ export class AudioEngine {
     // the same rate — a precondition for sample-accurate alignment.
     const buffer = await ctx.decodeAudioData(data.slice(0));
     return this.addTrackBuffer(name, buffer);
+  }
+
+  /** Decode multiple stems concurrently, then add them in the original order. */
+  async loadFiles(files: ReadonlyArray<{ name: string; data: ArrayBuffer }>): Promise<TrackState[]> {
+    const ctx = this.getContext();
+    const buffers = await Promise.all(
+      files.map(({ data }) => ctx.decodeAudioData(data.slice(0))),
+    );
+    return buffers.map((buffer, index) => this.addTrackBuffer(files[index].name, buffer));
   }
 
   /** Add an already-decoded buffer (used by the demo-stem synthesizer). */
@@ -380,7 +405,7 @@ export class AudioEngine {
   setVolume(id: string, volume: number): void {
     const t = this.tracks.get(id);
     if (!t) return;
-    t.volume = clampVolume(volume);
+    t.volume = clampTrackVolume(volume);
     this.rebuildTrackState(t);
     this.applyGains();
     this.notify();

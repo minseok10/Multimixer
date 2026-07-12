@@ -19,6 +19,8 @@ export interface GainInput {
   soloed: boolean;
 }
 
+export const MAX_TRACK_VOLUME = 1.5;
+
 /** True if at least one track is soloed. */
 export function anySoloed(tracks: readonly GainInput[]): boolean {
   return tracks.some((t) => t.soloed);
@@ -28,7 +30,7 @@ export function anySoloed(tracks: readonly GainInput[]): boolean {
 export function effectiveGain(track: GainInput, soloActive: boolean): number {
   if (track.muted) return 0;
   if (soloActive && !track.soloed) return 0;
-  return clampVolume(track.volume);
+  return clampTrackVolume(track.volume);
 }
 
 /** Resolve effective gains for all tracks. Returns a Map keyed by track id. */
@@ -48,5 +50,13 @@ export function clampVolume(v: number): number {
   if (Number.isNaN(v)) return 0;
   if (v < 0) return 0;
   if (v > 1) return 1;
+  return v;
+}
+
+/** Clamp an individual stem fader into the valid [0, 1.5] range. */
+export function clampTrackVolume(v: number): number {
+  if (Number.isNaN(v)) return 0;
+  if (v < 0) return 0;
+  if (v > MAX_TRACK_VOLUME) return MAX_TRACK_VOLUME;
   return v;
 }
