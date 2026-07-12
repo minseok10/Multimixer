@@ -21,6 +21,7 @@
 
 import { resolveEffectiveGains, clampVolume, type GainInput } from './gains';
 import { createLimiter } from './limiter';
+import { buildMetronomeBuffer } from './metronome';
 import { computePeaks } from './peaks';
 import { computePosition, loopActive } from './transport';
 import type { EngineState, LoopRegion, Peaks, TrackState } from './types';
@@ -73,6 +74,20 @@ export class AudioEngine {
   private loop: LoopRegion | null = null;
   private loopEnabled = false;
 
+  // Metronome: a click track played as one more source at the shared t0, so it
+  // is phase-locked to the music by the same guarantee as the tracks.
+  private metronomeEnabled = false;
+  private metronomeBpm = 120;
+  private metronomeVolume = 0.7;
+  private metronomeBpmFromFile = false;
+  private metronomeGain: GainNode | null = null;
+  private metronomeBuffer: AudioBuffer | null = null;
+  private metronomeSource: AudioBufferSourceNode | null = null;
+  private metronomeScheduledStart: number | null = null;
+  /** State the current metronomeBuffer was rendered for, to know when to rebuild. */
+  private metronomeBufferBpm = 0;
+  private metronomeBufferSamples = 0;
+
   private listeners = new Set<() => void>();
   private snapshot: EngineState = this.emptySnapshot();
 
@@ -93,8 +108,13 @@ export class AudioEngine {
     master.connect(limiter);
     limiter.connect(ctx.destination);
     // `limiter` stays alive via the audio graph connection above.
+    // Metronome has its own gain, summed into the master bus.
+    const metroGain = ctx.createGain();
+    metroGain.gain.value = this.metronomeVolume;
+    metroGain.connect(master);
     this.ctx = ctx;
     this.masterGain = master;
+    this.metronomeGain = metroGain;
     return ctx;
   }
 
@@ -209,20 +229,23 @@ export class AudioEngine {
       : this.timelineSamples / this.getContext().sampleRate;
   }
 
-  /** Current playback position in seconds, derived from the audio clock. */
-  get currentTime(): number {
-    const ctx = this.ctx;
-    const now = ctx ? ctx.currentTime : 0;
+  /** Playback position (s) the transport will be at a given context time. */
+  private positionAt(contextTime: number): number {
     return computePosition({
       isPlaying: this._isPlaying,
       startOffset: this.startOffset,
       startContextTime: this.startContextTime,
-      now,
+      now: contextTime,
       duration: this.durationSeconds,
       loop: this.loop,
       loopEnabled: this.loopEnabled,
       pausedAt: this.pausedAt,
     }).position;
+  }
+
+  /** Current playback position in seconds, derived from the audio clock. */
+  get currentTime(): number {
+    return this.positionAt(this.ctx ? this.ctx.currentTime : 0);
   }
 
   async play(): Promise<void> {
@@ -262,6 +285,10 @@ export class AudioEngine {
     this.startContextTime = t0;
     this.startOffset = offset;
     this._isPlaying = true;
+
+    // Schedule the metronome at the very same t0/offset/loop as the tracks.
+    if (this.metronomeEnabled) this.scheduleMetronome(t0, offset, looping);
+
     this.notify();
   }
 
@@ -305,6 +332,7 @@ export class AudioEngine {
 
   private teardownSources(): void {
     this.playToken++; // invalidate any pending onended
+    this.teardownMetronome();
     for (const t of this.tracks.values()) {
       if (t.source) {
         t.source.onended = null;
@@ -398,6 +426,102 @@ export class AudioEngine {
     void this.play();
   }
 
+  // ---- Metronome ---------------------------------------------------------
+
+  setMetronomeEnabled(enabled: boolean): void {
+    if (this.metronomeEnabled === enabled) return;
+    this.metronomeEnabled = enabled;
+    // Toggle only the click source; never disturb the tracks that are playing.
+    if (this._isPlaying) {
+      if (enabled) this.insertMetronomeMidPlay();
+      else this.teardownMetronome();
+    }
+    this.notify();
+  }
+
+  setMetronomeBpm(bpm: number, fromFile = false): void {
+    if (!Number.isFinite(bpm)) return;
+    this.metronomeBpm = Math.min(300, Math.max(20, Math.round(bpm)));
+    this.metronomeBpmFromFile = fromFile;
+    // A new BPM means a new click buffer; re-align if it's currently sounding.
+    if (this._isPlaying && this.metronomeEnabled) this.insertMetronomeMidPlay();
+    this.notify();
+  }
+
+  setMetronomeVolume(volume: number): void {
+    this.metronomeVolume = clampVolume(volume);
+    if (this.metronomeGain && this.ctx) {
+      this.metronomeGain.gain.setTargetAtTime(
+        this.metronomeVolume,
+        this.ctx.currentTime,
+        SMOOTH,
+      );
+    }
+    this.notify();
+  }
+
+  /** (Re)build the click buffer for the current timeline length and BPM. */
+  private ensureMetronomeBuffer(): void {
+    const samples = this.timelineSamples;
+    if (samples === 0) {
+      this.metronomeBuffer = null;
+      return;
+    }
+    if (
+      this.metronomeBuffer &&
+      this.metronomeBufferBpm === this.metronomeBpm &&
+      this.metronomeBufferSamples === samples
+    ) {
+      return;
+    }
+    this.metronomeBuffer = buildMetronomeBuffer(this.sampleRate, samples, this.metronomeBpm);
+    this.metronomeBufferBpm = this.metronomeBpm;
+    this.metronomeBufferSamples = samples;
+  }
+
+  /** Schedule the click source at a shared start time (called from play()). */
+  private scheduleMetronome(t0: number, offset: number, looping: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.metronomeGain) return;
+    this.ensureMetronomeBuffer();
+    if (!this.metronomeBuffer) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.metronomeBuffer;
+    if (looping && this.loop) {
+      src.loop = true;
+      src.loopStart = this.loop.start;
+      src.loopEnd = this.loop.end;
+    }
+    src.connect(this.metronomeGain);
+    src.start(t0, offset);
+    this.metronomeSource = src;
+    this.metronomeScheduledStart = t0;
+  }
+
+  /** Insert the click source aligned to the running transport, tracks untouched. */
+  private insertMetronomeMidPlay(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t0 = ctx.currentTime + LOOKAHEAD;
+    const offset = this.positionAt(t0);
+    this.teardownMetronome();
+    this.scheduleMetronome(t0, offset, loopActive(this.loop, this.loopEnabled));
+  }
+
+  private teardownMetronome(): void {
+    if (this.metronomeSource) {
+      this.metronomeSource.onended = null;
+      try {
+        this.metronomeSource.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.metronomeSource.disconnect();
+      this.metronomeSource = null;
+    }
+    this.metronomeScheduledStart = null;
+  }
+
   // ---- Verification hook -------------------------------------------------
 
   /**
@@ -409,6 +533,7 @@ export class AudioEngine {
     startOffset: number;
     isPlaying: boolean;
     sources: { id: string; name: string; scheduledStart: number | null }[];
+    metronome: { enabled: boolean; scheduledStart: number | null };
   } {
     return {
       startContextTime: this.startContextTime,
@@ -418,6 +543,10 @@ export class AudioEngine {
         const t = this.tracks.get(id)!;
         return { id: t.id, name: t.name, scheduledStart: t.scheduledStart };
       }),
+      metronome: {
+        enabled: this.metronomeEnabled,
+        scheduledStart: this.metronomeScheduledStart,
+      },
     };
   }
 
@@ -473,6 +602,10 @@ export class AudioEngine {
       masterVolume: this._masterVolume,
       loop: null,
       loopEnabled: false,
+      metronomeEnabled: this.metronomeEnabled,
+      metronomeBpm: this.metronomeBpm,
+      metronomeVolume: this.metronomeVolume,
+      metronomeBpmFromFile: this.metronomeBpmFromFile,
     };
   }
 
@@ -484,6 +617,10 @@ export class AudioEngine {
       masterVolume: this._masterVolume,
       loop: this.loop,
       loopEnabled: this.loopEnabled,
+      metronomeEnabled: this.metronomeEnabled,
+      metronomeBpm: this.metronomeBpm,
+      metronomeVolume: this.metronomeVolume,
+      metronomeBpmFromFile: this.metronomeBpmFromFile,
     };
   }
 

@@ -44,4 +44,9 @@ export interface EngineState {
   masterVolume: number;
   loop: LoopRegion | null;
   loopEnabled: boolean;
+  metronomeEnabled: boolean;
+  metronomeBpm: number;
+  metronomeVolume: number;
+  /** True when the current BPM was read from an uploaded file's metadata. */
+  metronomeBpmFromFile: boolean;
 }

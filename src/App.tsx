@@ -6,13 +6,14 @@
  * snapshot at call time) so memoized track rows don't re-render needlessly.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { engine, useEngineState } from './state/useEngine';
 import { Transport } from './components/Transport';
 import { TrackRow } from './components/TrackRow';
 import { DropZone } from './components/DropZone';
 import { buildDemoStems } from './audio/demoStems';
 import { renderMix, encodeWav } from './audio/mixdown';
+import { readBpm } from './audio/readBpm';
 import type { LoopRegion } from './audio/types';
 
 export default function App() {
@@ -52,6 +53,21 @@ export default function App() {
   }, []);
   const onMasterVolume = useCallback((v: number) => engine.setMasterVolume(v), []);
 
+  // BPM: keep the slider snappy locally, but debounce the engine update so a
+  // drag doesn't rebuild the full-timeline click buffer on every tick.
+  const [bpm, setBpm] = useState(state.metronomeBpm);
+  useEffect(() => setBpm(state.metronomeBpm), [state.metronomeBpm]);
+  const bpmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const onMetronomeBpm = useCallback((v: number) => {
+    setBpm(v);
+    clearTimeout(bpmTimer.current);
+    bpmTimer.current = setTimeout(() => engine.setMetronomeBpm(v), 150);
+  }, []);
+  const onMetronomeToggle = useCallback(() => {
+    engine.setMetronomeEnabled(!engine.getSnapshot().metronomeEnabled);
+  }, []);
+  const onMetronomeVolume = useCallback((v: number) => engine.setMetronomeVolume(v), []);
+
   const onLoadDemo = useCallback(async () => {
     setError(null);
     setLoading(true);
@@ -74,6 +90,14 @@ export default function App() {
       for (const f of files) {
         const buf = await f.arrayBuffer();
         await engine.loadFile(f.name.replace(/\.[^.]+$/, ''), buf);
+      }
+      // If any file carries a BPM tag, adopt it for the metronome.
+      for (const f of files) {
+        const detected = await readBpm(f);
+        if (detected) {
+          engine.setMetronomeBpm(detected, true);
+          break;
+        }
       }
     } catch (e) {
       setError(`파일 로드 실패: ${(e as Error).message}`);
@@ -119,12 +143,19 @@ export default function App() {
         loopEnabled={state.loopEnabled}
         hasTracks={hasTracks}
         exporting={exporting}
+        metronomeEnabled={state.metronomeEnabled}
+        metronomeBpm={bpm}
+        metronomeVolume={state.metronomeVolume}
+        metronomeBpmFromFile={state.metronomeBpmFromFile}
         onPlayPause={onPlayPause}
         onStop={onStop}
         onToggleLoop={onToggleLoop}
         onClearLoop={onClearLoop}
         onMasterVolume={onMasterVolume}
         onExport={onExport}
+        onMetronomeToggle={onMetronomeToggle}
+        onMetronomeBpm={onMetronomeBpm}
+        onMetronomeVolume={onMetronomeVolume}
       />
 
       {error && <div className="error-banner">{error}</div>}

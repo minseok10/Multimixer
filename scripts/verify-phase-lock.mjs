@@ -87,6 +87,25 @@ const loop = await page.evaluate(async () => {
 });
 check('loop wraps within region and keeps playing', loop.playing && loop.pos >= 1 && loop.pos < 2, `pos=${loop.pos.toFixed(3)}`);
 
+// The metronome click is scheduled at the very same t0 as the tracks.
+const metro = await page.evaluate(async () => {
+  const e = window.__mmEngine;
+  e.setMetronomeBpm(120);
+  e.setMetronomeEnabled(true);
+  await e.play();
+  const d = e.getDebugSchedule();
+  const trackStart = d.sources[0].scheduledStart;
+  const out = {
+    ok: d.metronome.enabled && d.metronome.scheduledStart === trackStart && d.sources.every((s) => s.scheduledStart === trackStart),
+    trackStart,
+    metroStart: d.metronome.scheduledStart,
+  };
+  e.stop();
+  e.setMetronomeEnabled(false);
+  return out;
+});
+check('metronome shares tracks t0 (phase lock)', metro.ok, `track=${metro.trackStart} metro=${metro.metroStart}`);
+
 await browser.close();
 server.close();
 

@@ -18,12 +18,19 @@ interface Props {
   loopEnabled: boolean;
   hasTracks: boolean;
   exporting: boolean;
+  metronomeEnabled: boolean;
+  metronomeBpm: number;
+  metronomeVolume: number;
+  metronomeBpmFromFile: boolean;
   onPlayPause: () => void;
   onStop: () => void;
   onToggleLoop: () => void;
   onClearLoop: () => void;
   onMasterVolume: (v: number) => void;
   onExport: () => void;
+  onMetronomeToggle: () => void;
+  onMetronomeBpm: (v: number) => void;
+  onMetronomeVolume: (v: number) => void;
 }
 
 function TimeReadout({
@@ -63,12 +70,19 @@ export function Transport({
   loopEnabled,
   hasTracks,
   exporting,
+  metronomeEnabled,
+  metronomeBpm,
+  metronomeVolume,
+  metronomeBpmFromFile,
   onPlayPause,
   onStop,
   onToggleLoop,
   onClearLoop,
   onMasterVolume,
   onExport,
+  onMetronomeToggle,
+  onMetronomeBpm,
+  onMetronomeVolume,
 }: Props) {
   return (
     <div className="transport">
@@ -112,6 +126,56 @@ export function Transport({
             해제
           </button>
         )}
+      </div>
+
+      <div className="metronome">
+        <label className={`metro-toggle${metronomeEnabled ? ' on' : ''}`}>
+          <input
+            type="checkbox"
+            checked={metronomeEnabled}
+            onChange={onMetronomeToggle}
+            disabled={!hasTracks}
+          />
+          메트로놈
+        </label>
+        <input
+          className="bpm-number"
+          type="number"
+          min={20}
+          max={300}
+          value={metronomeBpm}
+          onChange={(e) => onMetronomeBpm(Number(e.target.value))}
+          disabled={!hasTracks}
+          aria-label="BPM"
+        />
+        <span className="bpm-unit">BPM</span>
+        {metronomeBpmFromFile && (
+          <span className="bpm-badge" title="파일 메타데이터에서 감지된 BPM">
+            파일
+          </span>
+        )}
+        <input
+          className="bpm-slider"
+          type="range"
+          min={20}
+          max={300}
+          step={1}
+          value={metronomeBpm}
+          onChange={(e) => onMetronomeBpm(Number(e.target.value))}
+          disabled={!hasTracks}
+          aria-label="BPM 슬라이더"
+        />
+        <input
+          className="metro-vol"
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={metronomeVolume}
+          onChange={(e) => onMetronomeVolume(Number(e.target.value))}
+          title="메트로놈 볼륨"
+          aria-label="메트로놈 볼륨"
+        />
       </div>
 
       <div className="master">
