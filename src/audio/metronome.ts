@@ -6,9 +6,22 @@
  * AudioEngine). That means the metronome is phase-locked to the music by the
  * exact same guarantee as the tracks — it can't drift.
  *
+ * The buffer is rendered at a reduced sample rate (METRONOME_SAMPLE_RATE) to cut
+ * memory and build cost ~4x on long files. The source node resamples it to the
+ * context rate, and loopStart/loopEnd/offset are all expressed in seconds, so the
+ * click timing is preserved to sub-millisecond.
+ *
  * Uniform clicks (no accent): the first click sits at t=0 (the downbeat anchor)
  * and repeats every 60/bpm seconds.
  */
+
+/**
+ * Render rate for the click buffer. Comfortably above the click's 1.2 kHz
+ * content (Nyquist 6 kHz) but far below a typical 48 kHz context, so a
+ * full-length click track costs ~1/4 the memory. Onset placement is quantized to
+ * 1/12000 s (~83 µs) before resampling — inaudible as misalignment.
+ */
+export const METRONOME_SAMPLE_RATE = 12000;
 
 const CLICK_FREQ = 1200;
 const CLICK_DURATION = 0.03; // seconds
@@ -25,27 +38,26 @@ export function beatTimes(duration: number, bpm: number): number[] {
 }
 
 /**
- * Render a click buffer covering `lengthSamples` at `sampleRate`, with a click
- * at every beat. Uses a throwaway OfflineAudioContext purely as a buffer factory
- * so the buffer matches the engine's sample rate (same pattern as demoStems).
+ * Render a click buffer spanning `durationSec` at `renderRate`, with a click at
+ * every beat. Uses a throwaway OfflineAudioContext purely as a buffer factory.
  */
 export function buildMetronomeBuffer(
-  sampleRate: number,
-  lengthSamples: number,
+  renderRate: number,
+  durationSec: number,
   bpm: number,
 ): AudioBuffer {
-  const factory = new OfflineAudioContext(1, Math.max(1, lengthSamples), sampleRate);
-  const buffer = factory.createBuffer(1, Math.max(1, lengthSamples), sampleRate);
+  const lengthSamples = Math.max(1, Math.ceil(durationSec * renderRate));
+  const factory = new OfflineAudioContext(1, lengthSamples, renderRate);
+  const buffer = factory.createBuffer(1, lengthSamples, renderRate);
   const data = buffer.getChannelData(0);
 
-  const duration = lengthSamples / sampleRate;
-  const clickSamples = Math.floor(CLICK_DURATION * sampleRate);
+  const clickSamples = Math.floor(CLICK_DURATION * renderRate);
 
-  for (const t of beatTimes(duration, bpm)) {
-    const start = Math.floor(t * sampleRate);
+  for (const t of beatTimes(durationSec, bpm)) {
+    const start = Math.floor(t * renderRate);
     const end = Math.min(lengthSamples, start + clickSamples);
     for (let i = start; i < end; i++) {
-      const tt = (i - start) / sampleRate;
+      const tt = (i - start) / renderRate;
       data[i] = Math.sin(2 * Math.PI * CLICK_FREQ * tt) * Math.exp(-tt / CLICK_DECAY) * 0.9;
     }
   }

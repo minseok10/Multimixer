@@ -21,7 +21,7 @@
 
 import { resolveEffectiveGains, clampVolume, type GainInput } from './gains';
 import { createLimiter } from './limiter';
-import { buildMetronomeBuffer } from './metronome';
+import { buildMetronomeBuffer, METRONOME_SAMPLE_RATE } from './metronome';
 import { computePeaks } from './peaks';
 import { computePosition, loopActive } from './transport';
 import type { EngineState, LoopRegion, Peaks, TrackState } from './types';
@@ -84,6 +84,8 @@ export class AudioEngine {
   private metronomeBuffer: AudioBuffer | null = null;
   private metronomeSource: AudioBufferSourceNode | null = null;
   private metronomeScheduledStart: number | null = null;
+  /** t0 - currentTime measured when the click's start() was called; must be > 0. */
+  private metronomeScheduleLatency: number | null = null;
   /** State the current metronomeBuffer was rendered for, to know when to rebuild. */
   private metronomeBufferBpm = 0;
   private metronomeBufferSamples = 0;
@@ -256,6 +258,11 @@ export class AudioEngine {
     let offset = this.pausedAt;
     const duration = this.durationSeconds;
     if (offset >= duration) offset = 0; // restart from top if parked at the end
+
+    // Build the click buffer BEFORE fixing t0: this is the only heavy synchronous
+    // work in play(), and doing it after t0 could push the metronome's start()
+    // past t0 (a missed, late click). See scheduleMetronome.
+    if (this.metronomeEnabled) this.ensureMetronomeBuffer();
 
     const t0 = ctx.currentTime + LOOKAHEAD;
     const token = ++this.playToken;
@@ -474,7 +481,12 @@ export class AudioEngine {
     ) {
       return;
     }
-    this.metronomeBuffer = buildMetronomeBuffer(this.sampleRate, samples, this.metronomeBpm);
+    // Rendered at a reduced rate; the source node resamples to the context rate.
+    this.metronomeBuffer = buildMetronomeBuffer(
+      METRONOME_SAMPLE_RATE,
+      this.durationSeconds,
+      this.metronomeBpm,
+    );
     this.metronomeBufferBpm = this.metronomeBpm;
     this.metronomeBufferSamples = samples;
   }
@@ -493,6 +505,10 @@ export class AudioEngine {
       src.loopEnd = this.loop.end;
     }
     src.connect(this.metronomeGain);
+    // Headroom between now and t0, measured at the moment we call start(). If this
+    // ever goes <= 0 the click would be scheduled in the past (late) — the verify
+    // script asserts it stays positive.
+    this.metronomeScheduleLatency = t0 - ctx.currentTime;
     src.start(t0, offset);
     this.metronomeSource = src;
     this.metronomeScheduledStart = t0;
@@ -502,6 +518,7 @@ export class AudioEngine {
   private insertMetronomeMidPlay(): void {
     const ctx = this.ctx;
     if (!ctx) return;
+    this.ensureMetronomeBuffer(); // build before fixing t0 (see play())
     const t0 = ctx.currentTime + LOOKAHEAD;
     const offset = this.positionAt(t0);
     this.teardownMetronome();
@@ -520,6 +537,7 @@ export class AudioEngine {
       this.metronomeSource = null;
     }
     this.metronomeScheduledStart = null;
+    this.metronomeScheduleLatency = null;
   }
 
   // ---- Verification hook -------------------------------------------------
@@ -533,7 +551,11 @@ export class AudioEngine {
     startOffset: number;
     isPlaying: boolean;
     sources: { id: string; name: string; scheduledStart: number | null }[];
-    metronome: { enabled: boolean; scheduledStart: number | null };
+    metronome: {
+      enabled: boolean;
+      scheduledStart: number | null;
+      scheduleLatency: number | null;
+    };
   } {
     return {
       startContextTime: this.startContextTime,
@@ -546,6 +568,7 @@ export class AudioEngine {
       metronome: {
         enabled: this.metronomeEnabled,
         scheduledStart: this.metronomeScheduledStart,
+        scheduleLatency: this.metronomeScheduleLatency,
       },
     };
   }

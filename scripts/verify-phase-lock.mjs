@@ -87,7 +87,8 @@ const loop = await page.evaluate(async () => {
 });
 check('loop wraps within region and keeps playing', loop.playing && loop.pos >= 1 && loop.pos < 2, `pos=${loop.pos.toFixed(3)}`);
 
-// The metronome click is scheduled at the very same t0 as the tracks.
+// The metronome click is scheduled at the very same t0 as the tracks, and its
+// start() is not scheduled in the past (positive headroom == not a late click).
 const metro = await page.evaluate(async () => {
   const e = window.__mmEngine;
   e.setMetronomeBpm(120);
@@ -97,6 +98,7 @@ const metro = await page.evaluate(async () => {
   const trackStart = d.sources[0].scheduledStart;
   const out = {
     ok: d.metronome.enabled && d.metronome.scheduledStart === trackStart && d.sources.every((s) => s.scheduledStart === trackStart),
+    latency: d.metronome.scheduleLatency,
     trackStart,
     metroStart: d.metronome.scheduledStart,
   };
@@ -105,6 +107,7 @@ const metro = await page.evaluate(async () => {
   return out;
 });
 check('metronome shares tracks t0 (phase lock)', metro.ok, `track=${metro.trackStart} metro=${metro.metroStart}`);
+check('metronome start() has positive headroom (not late)', metro.latency !== null && metro.latency > 0, `latency=${metro.latency}`);
 
 await browser.close();
 server.close();
