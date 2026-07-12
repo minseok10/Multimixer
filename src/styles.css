@@ -1,0 +1,326 @@
+:root {
+  --bg: #0f1115;
+  --panel: #181b22;
+  --panel-2: #1f232c;
+  --border: #2a2f3a;
+  --text: #e6e8ec;
+  --muted: #9aa3b2;
+  --accent: #5eead4;
+  --accent-dim: #2dd4bf;
+  --danger: #f87171;
+  --solo: #fbbf24;
+  --mute: #f87171;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 60px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.5px;
+}
+.tagline {
+  margin: 4px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Transport ---------------------------------------------------------------- */
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+}
+.transport-buttons {
+  display: flex;
+  gap: 6px;
+}
+.transport button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.transport .play,
+.transport .stop {
+  width: 40px;
+  height: 34px;
+  font-size: 15px;
+}
+.transport .play {
+  color: var(--accent);
+}
+.transport button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.time {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+.time-current {
+  color: var(--accent);
+}
+.time-total,
+.time-sep {
+  color: var(--muted);
+}
+.loop-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.loop-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--text);
+}
+.loop-toggle.on {
+  color: var(--accent);
+}
+.loop-info {
+  font-variant-numeric: tabular-nums;
+}
+.master {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.master label {
+  color: var(--muted);
+}
+.export {
+  padding: 8px 12px;
+}
+.link-btn {
+  background: none !important;
+  border: none !important;
+  color: var(--accent) !important;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 !important;
+}
+
+/* Tracks ------------------------------------------------------------------- */
+.tracks {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.track-row {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  align-items: center;
+}
+.track-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.track-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.track-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+}
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.icon-btn:hover {
+  color: var(--danger);
+}
+.track-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toggle {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+}
+.toggle.mute.on {
+  background: var(--mute);
+  color: #1a1a1a;
+  border-color: var(--mute);
+}
+.toggle.solo.on {
+  background: var(--solo);
+  color: #1a1a1a;
+  border-color: var(--solo);
+}
+.volume {
+  flex: 1;
+  accent-color: var(--accent-dim);
+}
+.volume-value {
+  width: 26px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Waveform ----------------------------------------------------------------- */
+.waveform-lane {
+  position: relative;
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: text;
+  touch-action: none;
+}
+.waveform-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.playhead {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: #f5f5f5;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+  will-change: transform;
+}
+.loop-region {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(94, 234, 212, 0.12);
+  border-left: 1px solid rgba(94, 234, 212, 0.5);
+  border-right: 1px solid rgba(94, 234, 212, 0.5);
+  pointer-events: none;
+}
+.loop-region.active {
+  background: rgba(94, 234, 212, 0.2);
+}
+.loop-region.selecting {
+  background: rgba(251, 191, 36, 0.18);
+  border-color: rgba(251, 191, 36, 0.6);
+}
+
+/* Dropzone ----------------------------------------------------------------- */
+.dropzone {
+  margin-top: 16px;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.dropzone.compact {
+  padding: 14px;
+  margin-top: 12px;
+}
+.dropzone.dragging {
+  border-color: var(--accent);
+  background: rgba(94, 234, 212, 0.06);
+}
+.dropzone-text {
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.dropzone.compact .dropzone-text {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.dropzone-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.btn {
+  background: var(--accent-dim);
+  border: none;
+  color: #0a0a0a;
+  padding: 9px 16px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn.secondary {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error-banner {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+}
+
+@media (max-width: 640px) {
+  .track-row {
+    grid-template-columns: 1fr;
+  }
+  .master {
+    margin-left: 0;
+  }
+}
