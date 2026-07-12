@@ -261,6 +261,57 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Meters ------------------------------------------------------------------- */
+.meter {
+  position: relative;
+  height: 6px;
+  background: #10131a;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.meter-bar {
+  height: 100%;
+  width: 0%;
+  background: #34d399;
+}
+.master-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.master-meter-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 90px;
+}
+.meter.out {
+  height: 7px;
+}
+.meter.gr {
+  height: 4px;
+}
+.gr-bar {
+  background: #a78bfa;
+}
+.clip-led {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+.clip-led.lit {
+  color: #1a1a1a;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
 /* Waveform ----------------------------------------------------------------- */
 .waveform-lane {
   position: relative;

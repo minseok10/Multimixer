@@ -41,6 +41,8 @@ interface EngineTrack {
   /** Original (pre-pad) length in seconds, for display. */
   sourceDuration: number;
   gainNode: GainNode;
+  /** Post-gain tap for the level meter. */
+  analyser: AnalyserNode;
   volume: number;
   muted: boolean;
   soloed: boolean;
@@ -54,9 +56,17 @@ interface EngineTrack {
 let idCounter = 0;
 const nextId = () => `t${++idCounter}`;
 
+/** Analyser window for level metering (~21ms at 48kHz) — snappy peak reads. */
+const METER_FFT = 1024;
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private limiter: DynamicsCompressorNode | null = null;
+  /** Post-limiter tap for the master level meter. */
+  private masterAnalyser: AnalyserNode | null = null;
+  /** Reusable scratch buffer for analyser peak reads. */
+  private meterBuf = new Float32Array(METER_FFT);
 
   private tracks = new Map<string, EngineTrack>();
   private order: string[] = [];
@@ -109,13 +119,18 @@ export class AudioEngine {
     const limiter = createLimiter(ctx);
     master.connect(limiter);
     limiter.connect(ctx.destination);
-    // `limiter` stays alive via the audio graph connection above.
+    // Post-limiter tap: meters the true output (what the device hears).
+    const masterAnalyser = ctx.createAnalyser();
+    masterAnalyser.fftSize = METER_FFT;
+    limiter.connect(masterAnalyser);
     // Metronome has its own gain, summed into the master bus.
     const metroGain = ctx.createGain();
     metroGain.gain.value = this.metronomeVolume;
     metroGain.connect(master);
     this.ctx = ctx;
     this.masterGain = master;
+    this.limiter = limiter;
+    this.masterAnalyser = masterAnalyser;
     this.metronomeGain = metroGain;
     return ctx;
   }
@@ -148,6 +163,10 @@ export class AudioEngine {
 
     const gainNode = ctx.createGain();
     gainNode.connect(this.masterGain!);
+    // Side-tap for the per-track level meter (doesn't alter the audio path).
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = METER_FFT;
+    gainNode.connect(analyser);
 
     const track: EngineTrack = {
       id: nextId(),
@@ -155,6 +174,7 @@ export class AudioEngine {
       buffer,
       sourceDuration: buffer.duration,
       gainNode,
+      analyser,
       volume: 1,
       muted: false,
       soloed: false,
@@ -538,6 +558,37 @@ export class AudioEngine {
     }
     this.metronomeScheduledStart = null;
     this.metronomeScheduleLatency = null;
+  }
+
+  // ---- Metering ----------------------------------------------------------
+  // Cheap peak reads for the UI meters; polled from a requestAnimationFrame
+  // loop in the components, not pushed through React state.
+
+  /** Peak absolute sample over the analyser's latest window, in [0, ~]. */
+  private readPeak(analyser: AnalyserNode): number {
+    analyser.getFloatTimeDomainData(this.meterBuf);
+    let peak = 0;
+    for (let i = 0; i < this.meterBuf.length; i++) {
+      const a = Math.abs(this.meterBuf[i]);
+      if (a > peak) peak = a;
+    }
+    return peak;
+  }
+
+  /** Post-gain peak level for one track (reflects volume/mute/solo). */
+  getTrackLevel(id: string): number {
+    const t = this.tracks.get(id);
+    return t ? this.readPeak(t.analyser) : 0;
+  }
+
+  /** Post-limiter peak level of the master output. */
+  getMasterLevel(): number {
+    return this.masterAnalyser ? this.readPeak(this.masterAnalyser) : 0;
+  }
+
+  /** Current limiter gain reduction in dB (<= 0; more negative = harder work). */
+  getReduction(): number {
+    return this.limiter ? this.limiter.reduction : 0;
   }
 
   // ---- Verification hook -------------------------------------------------

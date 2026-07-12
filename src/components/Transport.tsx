@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from 'react';
 import { engine } from '../state/useEngine';
+import { MasterMeter } from './Meter';
 import { formatTime } from '../audio/transport';
 import type { LoopRegion } from '../audio/types';
 
@@ -190,6 +191,7 @@ export function Transport({
           onChange={(e) => onMasterVolume(Number(e.target.value))}
         />
         <span className="volume-value">{Math.round(masterVolume * 100)}</span>
+        <MasterMeter active={isPlaying} />
       </div>
 
       <button

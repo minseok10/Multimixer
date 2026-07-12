@@ -4,8 +4,10 @@
  * playhead) don't re-render it.
  */
 
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import { Waveform } from './Waveform';
+import { Meter } from './Meter';
+import { engine } from '../state/useEngine';
 import type { LoopRegion, TrackState } from '../audio/types';
 
 interface Props {
@@ -37,6 +39,7 @@ function TrackRowImpl({
   onSeek,
   onSetLoop,
 }: Props) {
+  const getLevel = useCallback(() => engine.getTrackLevel(track.id), [track.id]);
   return (
     <div className="track-row">
       <div className="track-controls">
@@ -77,6 +80,7 @@ function TrackRowImpl({
           />
           <span className="volume-value">{Math.round(track.volume * 100)}</span>
         </div>
+        <Meter getLevel={getLevel} active={isPlaying} />
       </div>
       <Waveform
         peaks={track.peaks}
