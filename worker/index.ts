@@ -5,6 +5,11 @@ const MAX_TOTAL_BYTES = 8 * 1024 * 1024 * 1024;
 const MAX_SONGS = 200;
 const MAX_STEMS = 16;
 const LIST_CACHE_SECONDS = 60;
+const CREATOR_NOTE_KEY = 'site/creator-note.json';
+const COMMENT_PREFIX = 'comments/';
+const MAX_CREATOR_NOTE_LENGTH = 5000;
+const MAX_COMMENT_LENGTH = 1000;
+const MAX_COMMENTS_PER_SONG = 100;
 
 const AUDIO_TYPES: Record<string, string> = {
   wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', flac: 'audio/flac',
@@ -38,6 +43,22 @@ interface SongRecord {
   url: string;
 }
 
+interface SongDetailRecord extends SongRecord {
+  stems: StemRecord[];
+}
+
+interface CreatorNote {
+  content: string;
+  updatedAt: string | null;
+}
+
+interface SongComment {
+  id: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 class HttpError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
@@ -48,8 +69,28 @@ export default {
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
 
     try {
+      if (url.pathname === '/api/creator-note') {
+        if (request.method === 'GET') return await getCreatorNote(env);
+        if (request.method === 'PUT') {
+          await requireAdmin(request, env);
+          return await updateCreatorNote(request, env);
+        }
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/songs') {
         return await listSongs(request, env, ctx);
+      }
+
+      const commentsMatch = url.pathname.match(/^\/api\/songs\/([^/]+)\/comments$/);
+      if (commentsMatch) {
+        if (request.method === 'GET') return await listComments(env, commentsMatch[1]);
+        if (request.method === 'POST') return await createComment(request, env, commentsMatch[1]);
+      }
+
+      const commentMatch = url.pathname.match(/^\/api\/songs\/([^/]+)\/comments\/([^/]+)$/);
+      if (commentMatch) {
+        if (request.method === 'PUT') return await updateComment(request, env, commentMatch[1], commentMatch[2]);
+        if (request.method === 'DELETE') return await deleteComment(env, commentMatch[1], commentMatch[2]);
       }
 
       const publicMatch = url.pathname.match(/^\/api\/songs\/([^/]+)(?:\/stems\/([^/]+))?$/);
@@ -76,10 +117,14 @@ export default {
         return await completeSong(request, env, completeMatch[1]);
       }
 
-      const deleteMatch = url.pathname.match(/^\/api\/admin\/songs\/([^/]+)$/);
-      if (request.method === 'DELETE' && deleteMatch) {
+      const adminSongMatch = url.pathname.match(/^\/api\/admin\/songs\/([^/]+)$/);
+      if (request.method === 'PATCH' && adminSongMatch) {
         await requireAdmin(request, env);
-        return await deleteSong(request, env, deleteMatch[1]);
+        return await updateSongDetails(request, env, adminSongMatch[1]);
+      }
+      if (request.method === 'DELETE' && adminSongMatch) {
+        await requireAdmin(request, env);
+        return await deleteSong(request, env, adminSongMatch[1]);
       }
       return json({ error: 'API 경로를 찾을 수 없습니다.' }, 404);
     } catch (error) {
@@ -114,10 +159,7 @@ async function listSongs(request: Request, env: Env, ctx: ExecutionContext): Pro
 }
 
 async function createSong(request: Request, env: Env): Promise<Response> {
-  const contentLength = Number(request.headers.get('Content-Length') || 0);
-  if (contentLength > 4096) throw new HttpError(413, '노래 정보가 너무 큽니다.');
-  let body: unknown;
-  try { body = await request.json(); } catch { throw new HttpError(400, '올바른 JSON이 필요합니다.'); }
+  const body = await readJsonBody(request, 4096, '노래 정보');
   const name = cleanText(isRecord(body) && typeof body.name === 'string' ? body.name : null, 120, '노래 이름');
   const bpm = isRecord(body) ? body.bpm : undefined;
   if (typeof bpm !== 'number' || !Number.isInteger(bpm) || bpm < 20 || bpm > 300) {
@@ -187,7 +229,7 @@ async function completeSong(request: Request, env: Env, encodedSongId: string): 
 async function getSong(env: Env, encodedSongId: string): Promise<Response> {
   const manifest = await readManifest(env.SONGS, validateId(encodedSongId, '노래'));
   if (manifest.status !== 'complete') throw new HttpError(404, '노래를 찾을 수 없습니다.');
-  return json({ song: manifest });
+  return json({ song: toSongDetail(manifest) });
 }
 
 async function serveStem(request: Request, env: Env, encodedSongId: string, encodedStemId: string): Promise<Response> {
@@ -211,6 +253,134 @@ async function deleteSong(request: Request, env: Env, encodedSongId: string): Pr
   await invalidateSongListCache(request);
   console.log(JSON.stringify({ message: 'song deleted', id: songId, objectCount: keys.length }));
   return json({ ok: true });
+}
+
+async function updateSongDetails(request: Request, env: Env, encodedSongId: string): Promise<Response> {
+  const songId = validateId(encodedSongId, '노래');
+  const body = await readJsonBody(request, 4096, '노래 정보');
+  const name = cleanText(isRecord(body) && typeof body.name === 'string' ? body.name : null, 120, '노래 이름');
+  const bpm = isRecord(body) ? body.bpm : undefined;
+  if (typeof bpm !== 'number' || !Number.isInteger(bpm) || bpm < 20 || bpm > 300) {
+    throw new HttpError(400, 'BPM은 20에서 300 사이의 정수여야 합니다.');
+  }
+
+  const manifest = await readManifest(env.SONGS, songId);
+  if (manifest.status !== 'complete') throw new HttpError(409, '공개가 완료된 노래만 수정할 수 있습니다.');
+  manifest.name = name;
+  manifest.bpm = bpm;
+  await putManifest(env.SONGS, manifest);
+  await invalidateSongListCache(request);
+  console.log(JSON.stringify({ message: 'song metadata updated', id: songId, name, bpm }));
+  return json({ song: toSongDetail(manifest) });
+}
+
+async function getCreatorNote(env: Env): Promise<Response> {
+  const object = await env.SONGS.get(CREATOR_NOTE_KEY);
+  if (!object) return json({ note: { content: '', updatedAt: null } satisfies CreatorNote });
+  const value: unknown = await object.json();
+  if (!isCreatorNote(value)) throw new HttpError(500, '저장된 제작자 코멘트가 올바르지 않습니다.');
+  return json({ note: value });
+}
+
+async function updateCreatorNote(request: Request, env: Env): Promise<Response> {
+  const body = await readJsonBody(request, 24 * 1024, '제작자 코멘트');
+  const content = cleanMultilineText(
+    isRecord(body) && typeof body.content === 'string' ? body.content : null,
+    MAX_CREATOR_NOTE_LENGTH,
+    '제작자 코멘트',
+  );
+  const updatedAt = new Date().toISOString();
+  const note: CreatorNote = { content, updatedAt };
+  await env.SONGS.put(CREATOR_NOTE_KEY, JSON.stringify(note), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { kind: 'creator-note', updatedAt },
+    storageClass: 'Standard',
+  });
+  return json({ note });
+}
+
+async function listComments(env: Env, encodedSongId: string): Promise<Response> {
+  const songId = await requireCompleteSong(env, encodedSongId);
+  const objects = await listAllObjects(env.SONGS, commentPrefix(songId));
+  const comments = (await Promise.all(objects.slice(0, MAX_COMMENTS_PER_SONG).map(async (object) => {
+    try {
+      const stored = await env.SONGS.get(object.key);
+      if (!stored) return null;
+      const value: unknown = await stored.json();
+      return isSongComment(value) ? value : null;
+    } catch {
+      return null;
+    }
+  })))
+    .filter((comment): comment is SongComment => comment !== null)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return json({ comments, limit: MAX_COMMENTS_PER_SONG });
+}
+
+async function createComment(request: Request, env: Env, encodedSongId: string): Promise<Response> {
+  const songId = await requireCompleteSong(env, encodedSongId);
+  const existing = await listAllObjects(env.SONGS, commentPrefix(songId));
+  if (existing.length >= MAX_COMMENTS_PER_SONG) {
+    throw new HttpError(409, `댓글은 노래마다 최대 ${MAX_COMMENTS_PER_SONG}개까지 작성할 수 있습니다.`);
+  }
+  const body = await readJsonBody(request, 8192, '댓글');
+  const content = cleanMultilineText(
+    isRecord(body) && typeof body.content === 'string' ? body.content : null,
+    MAX_COMMENT_LENGTH,
+    '댓글',
+  );
+  const now = new Date().toISOString();
+  const comment: SongComment = { id: crypto.randomUUID(), content, createdAt: now, updatedAt: now };
+  await putComment(env.SONGS, songId, comment);
+  return json({ comment }, 201);
+}
+
+async function updateComment(
+  request: Request,
+  env: Env,
+  encodedSongId: string,
+  encodedCommentId: string,
+): Promise<Response> {
+  const songId = await requireCompleteSong(env, encodedSongId);
+  const commentId = validateId(encodedCommentId, '댓글');
+  const key = commentKey(songId, commentId);
+  const object = await env.SONGS.get(key);
+  if (!object) throw new HttpError(404, '댓글을 찾을 수 없습니다.');
+  const stored: unknown = await object.json();
+  if (!isSongComment(stored) || stored.id !== commentId) throw new HttpError(500, '저장된 댓글이 올바르지 않습니다.');
+  const body = await readJsonBody(request, 8192, '댓글');
+  const content = cleanMultilineText(
+    isRecord(body) && typeof body.content === 'string' ? body.content : null,
+    MAX_COMMENT_LENGTH,
+    '댓글',
+  );
+  const comment: SongComment = { ...stored, content, updatedAt: new Date().toISOString() };
+  await putComment(env.SONGS, songId, comment);
+  return json({ comment });
+}
+
+async function deleteComment(env: Env, encodedSongId: string, encodedCommentId: string): Promise<Response> {
+  const songId = await requireCompleteSong(env, encodedSongId);
+  const commentId = validateId(encodedCommentId, '댓글');
+  const key = commentKey(songId, commentId);
+  if (!await env.SONGS.head(key)) throw new HttpError(404, '댓글을 찾을 수 없습니다.');
+  await env.SONGS.delete(key);
+  return json({ ok: true });
+}
+
+async function requireCompleteSong(env: Env, encodedSongId: string): Promise<string> {
+  const songId = validateId(encodedSongId, '노래');
+  const manifest = await readManifest(env.SONGS, songId);
+  if (manifest.status !== 'complete') throw new HttpError(404, '노래를 찾을 수 없습니다.');
+  return songId;
+}
+
+async function putComment(bucket: R2Bucket, songId: string, comment: SongComment): Promise<void> {
+  await bucket.put(commentKey(songId, comment.id), JSON.stringify(comment), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { kind: 'comment', createdAt: comment.createdAt, updatedAt: comment.updatedAt },
+    storageClass: 'Standard',
+  });
 }
 
 async function readManifest(bucket: R2Bucket, songId: string): Promise<SongManifest> {
@@ -256,8 +426,23 @@ function toSongRecord(object: R2Object): SongRecord {
   };
 }
 
+function toSongDetail(manifest: SongManifest): SongDetailRecord {
+  return {
+    id: manifest.id,
+    name: manifest.name,
+    ...(manifest.bpm ? { bpm: manifest.bpm } : {}),
+    size: manifest.stems.reduce((sum, stem) => sum + stem.size, 0),
+    stemCount: manifest.stems.length,
+    uploadedAt: manifest.createdAt,
+    url: `/api/songs/${encodeURIComponent(manifest.id)}`,
+    stems: manifest.stems,
+  };
+}
+
 function manifestKey(songId: string): string { return `${SONG_PREFIX}${songId}/${MANIFEST_FILE}`; }
 function stemKey(songId: string, stemId: string): string { return `${SONG_PREFIX}${songId}/stems/${stemId}`; }
+function commentPrefix(songId: string): string { return `${SONG_PREFIX}${songId}/${COMMENT_PREFIX}`; }
+function commentKey(songId: string, commentId: string): string { return `${commentPrefix(songId)}${commentId}.json`; }
 
 function validateId(encodedId: string, label: string): string {
   let id: string;
@@ -274,6 +459,14 @@ function validateStemId(encodedId: string): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null; }
+function isCreatorNote(value: unknown): value is CreatorNote {
+  return isRecord(value) && typeof value.content === 'string'
+    && (value.updatedAt === null || typeof value.updatedAt === 'string');
+}
+function isSongComment(value: unknown): value is SongComment {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.content === 'string'
+    && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string';
+}
 function isManifest(value: unknown): value is SongManifest {
   return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string'
     && (value.bpm === undefined || (typeof value.bpm === 'number' && Number.isInteger(value.bpm) && value.bpm >= 20 && value.bpm <= 300))
@@ -317,6 +510,48 @@ function cleanText(value: string | null, maxLength: number, label: string): stri
   if (cleaned.length > maxLength) throw new HttpError(400, `${label}이 너무 깁니다.`);
   if (/[\u0000-\u001f\u007f]/.test(cleaned)) throw new HttpError(400, `${label}에 사용할 수 없는 문자가 있습니다.`);
   return cleaned;
+}
+
+function cleanMultilineText(value: string | null, maxLength: number, label: string): string {
+  const cleaned = value?.trim();
+  if (!cleaned) throw new HttpError(400, `${label} 내용이 필요합니다.`);
+  if (cleaned.length > maxLength) throw new HttpError(400, `${label}은 ${maxLength}자까지 입력할 수 있습니다.`);
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(cleaned)) {
+    throw new HttpError(400, `${label}에 사용할 수 없는 문자가 있습니다.`);
+  }
+  return cleaned;
+}
+
+async function readJsonBody(request: Request, maxBytes: number, label: string): Promise<unknown> {
+  const declaredLength = Number(request.headers.get('Content-Length') || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) throw new HttpError(413, `${label}가 너무 큽니다.`);
+  if (!request.body) throw new HttpError(400, '올바른 JSON이 필요합니다.');
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new HttpError(413, `${label}가 너무 큽니다.`);
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes)) as unknown;
+  } catch {
+    throw new HttpError(400, '올바른 JSON이 필요합니다.');
+  }
 }
 
 function contentDisposition(fileName: string): string {

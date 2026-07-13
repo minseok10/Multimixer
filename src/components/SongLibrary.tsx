@@ -3,6 +3,7 @@ import {
   basicAuthorization,
   fetchSongLibrary,
   formatBytes,
+  updateSongMetadata,
   type Song,
   type SongLibraryData,
 } from '../library';
@@ -23,7 +24,11 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
+  const [editingSong, setEditingSong] = useState<Song | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editBpm, setEditBpm] = useState('120');
   const inputRef = useRef<HTMLInputElement>(null);
+  const editFormRef = useRef<HTMLFormElement>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -42,6 +47,12 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     return () => controller.abort();
   }, [load]);
 
+  useEffect(() => {
+    if (!editingSong) return;
+    const frame = requestAnimationFrame(() => editFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+    return () => cancelAnimationFrame(frame);
+  }, [editingSong]);
+
   const chooseFiles = (next: File[]) => {
     setFiles(next);
     if (next[0] && !displayName.trim()) {
@@ -56,6 +67,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       setSongBpm('120');
       setFiles([]);
       setUploadProgress('');
+      setEditingSong(null);
       if (inputRef.current) inputRef.current.value = '';
     }
     setAdminOpen((open) => !open);
@@ -134,6 +146,35 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || '삭제에 실패했습니다.');
+      if (editingSong?.id === song.id) setEditingSong(null);
+      await load();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const beginEdit = (song: Song) => {
+    setEditingSong(song);
+    setEditName(song.name);
+    setEditBpm(String(song.bpm ?? 120));
+    setError(null);
+  };
+
+  const saveMetadata = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingSong) return;
+    const bpm = Number(editBpm);
+    if (!password || !editName.trim() || !Number.isInteger(bpm) || bpm < 20 || bpm > 300) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await updateSongMetadata(password, editingSong.id, editName.trim(), bpm);
+      setEditingSong(null);
+      setEditName('');
+      setEditBpm('120');
+      setPassword('');
       await load();
     } catch (cause) {
       setError((cause as Error).message);
@@ -169,14 +210,24 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
               <span className="song-meta">{song.stemCount} stems · {song.bpm ? `${song.bpm} BPM · ` : ''}{formatBytes(song.size)}</span>
             </button>
             {adminOpen && (
-              <button
-                className="song-delete"
-                onClick={() => void remove(song)}
-                disabled={uploading}
-                aria-label={`${song.name} 삭제`}
-              >
-                삭제
-              </button>
+              <div className="song-admin-actions">
+                <button
+                  className="song-edit"
+                  onClick={() => beginEdit(song)}
+                  disabled={uploading}
+                  aria-label={`${song.name} 정보 수정`}
+                >
+                  수정
+                </button>
+                <button
+                  className="song-delete"
+                  onClick={() => void remove(song)}
+                  disabled={uploading}
+                  aria-label={`${song.name} 삭제`}
+                >
+                  삭제
+                </button>
+              </div>
             )}
           </article>
         ))}
@@ -195,7 +246,55 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
         </div>
       )}
 
-      {adminOpen && data && (
+      {adminOpen && data && editingSong && (
+        <form ref={editFormRef} className="admin-song-edit" onSubmit={(event) => void saveMetadata(event)}>
+          <div className="admin-upload-heading">
+            <div>
+              <h3>노래 정보 수정</h3>
+              <p>스템은 그대로 두고 표시 제목과 BPM만 R2 manifest에서 수정합니다.</p>
+            </div>
+          </div>
+          <label>
+            관리자 비밀번호
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              maxLength={256}
+              required
+            />
+          </label>
+          <label>
+            표시할 노래 제목
+            <input type="text" value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={120} required />
+          </label>
+          <label>
+            BPM
+            <input
+              type="number"
+              value={editBpm}
+              onChange={(event) => setEditBpm(event.target.value)}
+              min={20}
+              max={300}
+              step={1}
+              inputMode="numeric"
+              required
+            />
+          </label>
+          <div className="admin-edit-actions">
+            <button type="button" className="btn secondary" onClick={() => {
+              setEditingSong(null);
+              setPassword('');
+            }} disabled={uploading}>취소</button>
+            <button className="btn" disabled={!password || !editName.trim() || !Number.isInteger(Number(editBpm)) || Number(editBpm) < 20 || Number(editBpm) > 300 || uploading}>
+              {uploading ? '수정 중…' : '제목과 BPM 저장'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {adminOpen && data && !editingSong && (
         <form className="admin-upload" onSubmit={(event) => void upload(event)}>
           <div className="admin-upload-heading">
             <div>

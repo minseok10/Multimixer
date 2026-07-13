@@ -45,6 +45,7 @@ function WaveformImpl({
   const playheadRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [sel, setSel] = useState<{ a: number; b: number } | null>(null);
+  const [themeVersion, setThemeVersion] = useState(0);
   const drag = useRef<{ startX: number; moved: boolean } | null>(null);
 
   // Track lane width for HiDPI-correct drawing.
@@ -59,6 +60,13 @@ function WaveformImpl({
     return () => ro.disconnect();
   }, []);
 
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const redraw = () => setThemeVersion((version) => version + 1);
+    media.addEventListener('change', redraw);
+    return () => media.removeEventListener('change', redraw);
+  }, []);
+
   // Draw the static waveform whenever peaks or size change.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -69,8 +77,16 @@ function WaveformImpl({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.scale(dpr, dpr);
-    drawWaveform(ctx, peaks, width, LANE_HEIGHT);
-  }, [peaks, width]);
+    const styles = getComputedStyle(document.documentElement);
+    drawWaveform(
+      ctx,
+      peaks,
+      width,
+      LANE_HEIGHT,
+      styles.getPropertyValue('--waveform-center').trim() || 'rgba(255,255,255,0.12)',
+      styles.getPropertyValue('--waveform').trim() || '#5eead4',
+    );
+  }, [peaks, themeVersion, width]);
 
   // Position the playhead: rAF while playing, single placement while paused.
   useEffect(() => {
@@ -169,20 +185,22 @@ function drawWaveform(
   peaks: Peaks,
   width: number,
   height: number,
+  centerColor: string,
+  waveformColor: string,
 ) {
   ctx.clearRect(0, 0, width, height);
   const mid = height / 2;
   const amp = height / 2 - 2;
 
   // Center line.
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.strokeStyle = centerColor;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, mid);
   ctx.lineTo(width, mid);
   ctx.stroke();
 
-  ctx.strokeStyle = '#5eead4';
+  ctx.strokeStyle = waveformColor;
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let x = 0; x < width; x++) {

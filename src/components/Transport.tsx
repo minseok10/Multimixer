@@ -151,8 +151,8 @@ export function Transport({
         />
         <span className="bpm-unit">BPM</span>
         {metronomeBpmFromFile && (
-          <span className="bpm-badge" title="파일 메타데이터에서 감지된 BPM">
-            파일
+          <span className="bpm-badge" title="노래에 저장된 BPM">
+            저장
           </span>
         )}
         <input

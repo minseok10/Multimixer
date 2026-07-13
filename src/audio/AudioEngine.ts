@@ -174,11 +174,17 @@ export class AudioEngine {
 
   /** Decode multiple stems concurrently, then add them in the original order. */
   async loadFiles(files: ReadonlyArray<{ name: string; data: ArrayBuffer }>): Promise<TrackState[]> {
+    const decoded = await this.decodeFiles(files);
+    return decoded.map(({ name, buffer }) => this.addTrackBuffer(name, buffer));
+  }
+
+  /** Decode without mutating the mixer, so route changes can discard stale loads safely. */
+  async decodeFiles(files: ReadonlyArray<{ name: string; data: ArrayBuffer }>): Promise<Array<{ name: string; buffer: AudioBuffer }>> {
     const ctx = this.getContext();
     const buffers = await Promise.all(
       files.map(({ data }) => ctx.decodeAudioData(data.slice(0))),
     );
-    return buffers.map((buffer, index) => this.addTrackBuffer(files[index].name, buffer));
+    return buffers.map((buffer, index) => ({ name: files[index].name, buffer }));
   }
 
   /** Add an already-decoded buffer (used by the demo-stem synthesizer). */

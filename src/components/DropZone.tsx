@@ -10,9 +10,10 @@ interface Props {
   onLoadDemo: () => void;
   loading: boolean;
   compact: boolean;
+  showDemo: boolean;
 }
 
-export function DropZone({ onFiles, onLoadDemo, loading, compact }: Props) {
+export function DropZone({ onFiles, onLoadDemo, loading, compact, showDemo }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -57,9 +58,11 @@ export function DropZone({ onFiles, onLoadDemo, loading, compact }: Props) {
           <button className="btn" onClick={() => inputRef.current?.click()} disabled={loading}>
             파일 선택
           </button>
-          <button className="btn secondary" onClick={onLoadDemo} disabled={loading}>
-            {loading ? '로드 중…' : '데모 스템 로드'}
-          </button>
+          {showDemo && (
+            <button className="btn secondary" onClick={onLoadDemo} disabled={loading}>
+              {loading ? '로드 중…' : '데모 스템 로드'}
+            </button>
+          )}
         </div>
       </div>
     </div>

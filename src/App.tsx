@@ -12,18 +12,26 @@ import { Transport } from './components/Transport';
 import { TrackRow } from './components/TrackRow';
 import { DropZone } from './components/DropZone';
 import { SongLibrary } from './components/SongLibrary';
+import { CreatorNote } from './components/CreatorNote';
+import { SongComments } from './components/SongComments';
 import { buildDemoStems } from './audio/demoStems';
 import { renderMix, encodeWav } from './audio/mixdown';
 import { readBpm } from './audio/readBpm';
 import type { LoopRegion } from './audio/types';
-import { fetchSongDetail, type Song } from './library';
+import { fetchSongDetailById, type Song } from './library';
+import { songIdFromPath, songPath } from './routes';
 
 export default function App() {
   const state = useEngineState();
-  const [loading, setLoading] = useState(false);
+  const initialSongId = useRef(songIdFromPath(window.location.pathname));
+  const initialRouteHandled = useRef(false);
+  const songLoadSequence = useRef(0);
+  const [loading, setLoading] = useState(Boolean(initialSongId.current));
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'library' | 'mixer'>('library');
+  const [view, setView] = useState<'library' | 'mixer'>(initialSongId.current ? 'mixer' : 'library');
+  const [selectedSong, setSelectedSong] = useState<Song | null>(null);
+  const [creatorNoteOpen, setCreatorNoteOpen] = useState(false);
 
   const hasTracks = state.tracks.length > 0;
   // While playing the playhead is driven by rAF, so this sentinel keeps track
@@ -77,41 +85,94 @@ export default function App() {
   }, []);
   const onMetronomeVolume = useCallback((v: number) => engine.setMetronomeVolume(v), []);
 
-  const onSelectSong = useCallback(async (song: Song) => {
+  const loadSongById = useCallback(async (songId: string, resumeFromGesture: boolean, navigate: boolean) => {
+    const sequence = ++songLoadSequence.current;
     setError(null);
     setLoading(true);
+    setView('mixer');
+    if (navigate) window.history.pushState({ songId }, '', songPath(songId));
     try {
-      // Resume synchronously from the click gesture before the network wait.
-      await engine.resume();
-      const detail = await fetchSongDetail(song);
-      engine.clear();
+      // A clicked song primes iOS audio immediately. Direct URLs decode while
+      // suspended and resume later from the user's play gesture.
+      if (resumeFromGesture) await engine.resume();
+      const detail = await fetchSongDetailById(songId);
+      if (sequence !== songLoadSequence.current) return;
+      setSelectedSong(detail);
       const downloaded = await Promise.all(detail.stems.map(async (stem) => {
         const response = await fetch(stem.url);
         if (!response.ok) throw new Error(`${stem.name} 스템을 내려받지 못했습니다.`);
-        const blob = await response.blob();
-        return { stem, blob, data: await blob.arrayBuffer() };
+        return { stem, data: await response.arrayBuffer() };
       }));
-      await engine.loadFiles(downloaded.map(({ stem, data }) => ({ name: stem.name, data })));
+      const decoded = await engine.decodeFiles(downloaded.map(({ stem, data }) => ({ name: stem.name, data })));
+      if (sequence !== songLoadSequence.current) return;
+      engine.clear();
+      for (const { name, buffer } of decoded) engine.addTrackBuffer(name, buffer);
       if (detail.bpm) engine.setMetronomeBpm(detail.bpm, true);
       setView('mixer');
     } catch (e) {
+      if (sequence !== songLoadSequence.current) return;
+      engine.clear();
+      setSelectedSong(null);
+      setView('library');
       setError(`노래 로드 실패: ${(e as Error).message}`);
+      if (songIdFromPath(window.location.pathname) === songId) {
+        window.history.replaceState(null, '', '/');
+      }
     } finally {
-      setLoading(false);
+      if (sequence === songLoadSequence.current) setLoading(false);
     }
   }, []);
 
+  const onSelectSong = useCallback(async (song: Song) => {
+    await loadSongById(song.id, true, true);
+  }, [loadSongById]);
+
+  const showLibrary = useCallback((navigate: boolean) => {
+    songLoadSequence.current++;
+    engine.clear();
+    setLoading(false);
+    setError(null);
+    setSelectedSong(null);
+    setView('library');
+    if (navigate && window.location.pathname !== '/') window.history.pushState(null, '', '/');
+  }, []);
+
+  useEffect(() => {
+    const applyCurrentRoute = () => {
+      const songId = songIdFromPath(window.location.pathname);
+      if (songId) void loadSongById(songId, false, false);
+      else {
+        if (window.location.pathname !== '/') window.history.replaceState(null, '', '/');
+        showLibrary(false);
+      }
+    };
+    if (!initialRouteHandled.current) {
+      initialRouteHandled.current = true;
+      if (initialSongId.current) void loadSongById(initialSongId.current, false, false);
+      else if (window.location.pathname !== '/') window.history.replaceState(null, '', '/');
+    }
+    window.addEventListener('popstate', applyCurrentRoute);
+    return () => window.removeEventListener('popstate', applyCurrentRoute);
+  }, [loadSongById, showLibrary]);
+
+  useEffect(() => {
+    document.title = selectedSong ? `${selectedSong.name} — Multimixer` : 'Multimixer — 멀티트랙 재생기';
+  }, [selectedSong]);
+
   const onCustomUpload = useCallback(() => {
+    songLoadSequence.current++;
     engine.clear();
     setError(null);
+    setSelectedSong(null);
     setView('mixer');
+    if (window.location.pathname !== '/') window.history.pushState(null, '', '/');
   }, []);
 
   const onBackToLibrary = useCallback(() => {
-    engine.clear();
-    setError(null);
-    setView('library');
-  }, []);
+    showLibrary(true);
+  }, [showLibrary]);
+
+  const closeCreatorNote = useCallback(() => setCreatorNoteOpen(false), []);
 
   const onLoadDemo = useCallback(async () => {
     setError(null);
@@ -179,9 +240,20 @@ export default function App() {
             <button className="back-library" onClick={onBackToLibrary}>← 노래 선택</button>
           )}
         </div>
-        <p className="tagline">
-          단일 오디오 클럭으로 모든 트랙을 샘플 단위 동기 재생 — 드리프트·위상 어긋남 없음
-        </p>
+        <div className="tagline-row">
+          <p className="tagline">
+            단일 오디오 클럭으로 모든 트랙을 샘플 단위 동기 재생 — 드리프트·위상 어긋남 없음
+          </p>
+          <div className="header-links">
+            <a className="github-link" href="https://github.com/minseok10/Multimixer" target="_blank" rel="noreferrer">
+              <GithubIcon />
+              <span>minseok10/Multimixer</span>
+            </a>
+            <button className="creator-note-trigger" onClick={() => setCreatorNoteOpen(true)}>
+              제작자 코멘트
+            </button>
+          </div>
+        </div>
       </header>
 
       {view === 'library' ? (
@@ -191,6 +263,18 @@ export default function App() {
         </>
       ) : (
         <>
+
+      {selectedSong && (
+        <section className="mixer-song-heading" aria-labelledby="mixer-song-title">
+          <div>
+            <span>NOW MIXING</span>
+            <h2 id="mixer-song-title">{selectedSong.name}</h2>
+          </div>
+          {selectedSong.bpm && <strong>{selectedSong.bpm} BPM</strong>}
+        </section>
+      )}
+
+      {loading && !hasTracks && <div className="mixer-loading">노래의 스템을 준비하는 중…</div>}
 
       <Transport
         isPlaying={state.isPlaying}
@@ -243,9 +327,22 @@ export default function App() {
         onLoadDemo={onLoadDemo}
         loading={loading}
         compact={hasTracks}
+        showDemo={!selectedSong}
       />
+
+      {selectedSong && <SongComments song={selectedSong} />}
         </>
       )}
+
+      <CreatorNote open={creatorNoteOpen} onClose={closeCreatorNote} />
     </div>
+  );
+}
+
+function GithubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="currentColor" d="M12 .7A11.3 11.3 0 0 0 8.4 22.8c.6.1.8-.3.8-.6v-2.1c-3.4.7-4.1-1.4-4.1-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6A4.7 4.7 0 0 1 5.7 7.5c-.1-.3-.5-1.6.1-3.3 0 0 1-.3 3.4 1.2a11.7 11.7 0 0 1 6.2 0c2.4-1.6 3.4-1.2 3.4-1.2.6 1.7.2 3 .1 3.3a4.7 4.7 0 0 1 1.2 3.2c0 4.6-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.3 11.3 0 0 0 12 .7Z" />
+    </svg>
   );
 }
