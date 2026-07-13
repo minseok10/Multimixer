@@ -70,8 +70,8 @@ export default function App() {
   }, []);
   const onMasterVolume = useCallback((v: number) => engine.setMasterVolume(v), []);
 
-  // BPM: keep the slider snappy locally, but debounce the engine update so a
-  // drag doesn't rebuild the full-timeline click buffer on every tick.
+  // Debounce numeric metronome edits so replacing a value does not rebuild the
+  // full-timeline click buffer once per keystroke.
   const [bpm, setBpm] = useState(state.metronomeBpm);
   useEffect(() => setBpm(state.metronomeBpm), [state.metronomeBpm]);
   const bpmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -79,6 +79,20 @@ export default function App() {
     setBpm(v);
     clearTimeout(bpmTimer.current);
     bpmTimer.current = setTimeout(() => engine.setMetronomeBpm(v), 150);
+  }, []);
+  const [downbeatOffset, setDownbeatOffset] = useState(String(state.metronomeDownbeatOffsetMs));
+  useEffect(() => setDownbeatOffset(String(state.metronomeDownbeatOffsetMs)), [state.metronomeDownbeatOffsetMs]);
+  const downbeatTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const onMetronomeDownbeatOffset = useCallback((value: string) => {
+    setDownbeatOffset(value);
+    if (value.trim() === '') return;
+    const offsetMs = Number(value);
+    if (!Number.isFinite(offsetMs)) return;
+    const sequence = songLoadSequence.current;
+    clearTimeout(downbeatTimer.current);
+    downbeatTimer.current = setTimeout(() => {
+      if (sequence === songLoadSequence.current) engine.setMetronomeDownbeatOffsetMs(offsetMs);
+    }, 150);
   }, []);
   const onMetronomeToggle = useCallback(() => {
     engine.setMetronomeEnabled(!engine.getSnapshot().metronomeEnabled);
@@ -302,6 +316,7 @@ export default function App() {
         metronomeEnabled={state.metronomeEnabled}
         metronomeBpm={bpm}
         metronomeVolume={state.metronomeVolume}
+        metronomeDownbeatOffset={downbeatOffset}
         metronomeBpmFromFile={state.metronomeBpmFromFile}
         onPlayPause={onPlayPause}
         onStop={onStop}
@@ -311,6 +326,7 @@ export default function App() {
         onExport={onExport}
         onMetronomeToggle={onMetronomeToggle}
         onMetronomeBpm={onMetronomeBpm}
+        onMetronomeDownbeatOffset={onMetronomeDownbeatOffset}
         onMetronomeVolume={onMetronomeVolume}
       />
 

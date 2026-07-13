@@ -47,6 +47,8 @@ export interface EngineState {
   metronomeEnabled: boolean;
   metronomeBpm: number;
   metronomeVolume: number;
+  /** Transient click phase correction in milliseconds; reset when tracks clear. */
+  metronomeDownbeatOffsetMs: number;
   /** True when the current BPM was read from an uploaded file's metadata. */
   metronomeBpmFromFile: boolean;
 }

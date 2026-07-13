@@ -32,6 +32,8 @@ const LOOKAHEAD = 0.08;
 const SMOOTH = 0.012;
 /** Waveform resolution. */
 const PEAK_BUCKETS = 2000;
+export const MIN_DOWNBEAT_OFFSET_MS = -200;
+export const MAX_DOWNBEAT_OFFSET_MS = 200;
 
 interface EngineTrack {
   id: string;
@@ -91,6 +93,7 @@ export class AudioEngine {
   private metronomeEnabled = false;
   private metronomeBpm = 120;
   private metronomeVolume = 0.7;
+  private metronomeDownbeatOffsetMs = 0;
   private metronomeBpmFromFile = false;
   private metronomeGain: GainNode | null = null;
   private metronomeBuffer: AudioBuffer | null = null;
@@ -101,6 +104,7 @@ export class AudioEngine {
   /** State the current metronomeBuffer was rendered for, to know when to rebuild. */
   private metronomeBufferBpm = 0;
   private metronomeBufferSamples = 0;
+  private metronomeBufferDownbeatOffsetMs = 0;
 
   private listeners = new Set<() => void>();
   private snapshot: EngineState = this.emptySnapshot();
@@ -266,6 +270,7 @@ export class AudioEngine {
     this.pausedAt = 0;
     this.loop = null;
     this.loopEnabled = false;
+    this.metronomeDownbeatOffsetMs = 0;
     this.notify();
   }
 
@@ -545,7 +550,20 @@ export class AudioEngine {
     this.notify();
   }
 
-  /** (Re)build the click buffer for the current timeline length and BPM. */
+  setMetronomeDownbeatOffsetMs(offsetMs: number): void {
+    if (!Number.isFinite(offsetMs)) return;
+    const next = Math.min(
+      MAX_DOWNBEAT_OFFSET_MS,
+      Math.max(MIN_DOWNBEAT_OFFSET_MS, Math.round(offsetMs)),
+    );
+    if (this.metronomeDownbeatOffsetMs === next) return;
+    this.metronomeDownbeatOffsetMs = next;
+    // Rebuild and reinsert only the click source; playing tracks stay untouched.
+    if (this._isPlaying && this.metronomeEnabled) this.insertMetronomeMidPlay();
+    this.notify();
+  }
+
+  /** (Re)build the click buffer for the current timeline, BPM, and phase. */
   private ensureMetronomeBuffer(): void {
     const samples = this.timelineSamples;
     if (samples === 0) {
@@ -555,7 +573,8 @@ export class AudioEngine {
     if (
       this.metronomeBuffer &&
       this.metronomeBufferBpm === this.metronomeBpm &&
-      this.metronomeBufferSamples === samples
+      this.metronomeBufferSamples === samples &&
+      this.metronomeBufferDownbeatOffsetMs === this.metronomeDownbeatOffsetMs
     ) {
       return;
     }
@@ -564,9 +583,11 @@ export class AudioEngine {
       METRONOME_SAMPLE_RATE,
       this.durationSeconds,
       this.metronomeBpm,
+      this.metronomeDownbeatOffsetMs / 1000,
     );
     this.metronomeBufferBpm = this.metronomeBpm;
     this.metronomeBufferSamples = samples;
+    this.metronomeBufferDownbeatOffsetMs = this.metronomeDownbeatOffsetMs;
   }
 
   /** Schedule the click source at a shared start time (called from play()). */
@@ -737,6 +758,7 @@ export class AudioEngine {
       metronomeEnabled: this.metronomeEnabled,
       metronomeBpm: this.metronomeBpm,
       metronomeVolume: this.metronomeVolume,
+      metronomeDownbeatOffsetMs: this.metronomeDownbeatOffsetMs,
       metronomeBpmFromFile: this.metronomeBpmFromFile,
     };
   }
@@ -752,6 +774,7 @@ export class AudioEngine {
       metronomeEnabled: this.metronomeEnabled,
       metronomeBpm: this.metronomeBpm,
       metronomeVolume: this.metronomeVolume,
+      metronomeDownbeatOffsetMs: this.metronomeDownbeatOffsetMs,
       metronomeBpmFromFile: this.metronomeBpmFromFile,
     };
   }

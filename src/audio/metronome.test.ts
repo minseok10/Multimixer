@@ -20,6 +20,21 @@ describe('beatTimes', () => {
     }
   });
 
+  it('moves clicks later for a positive downbeat offset', () => {
+    expect(beatTimes(2, 120, 0.037)).toEqual([0.037, 0.537, 1.037, 1.537]);
+  });
+
+  it('moves clicks earlier and skips the beat before the file boundary', () => {
+    const t = beatTimes(2, 120, -0.037);
+    expect(t).toHaveLength(4);
+    expect(t[0]).toBeCloseTo(0.463);
+    expect(t[3]).toBeCloseTo(1.963);
+  });
+
+  it('keeps an exactly shifted beat at the file boundary', () => {
+    expect(beatTimes(1, 120, -0.5)[0]).toBe(0);
+  });
+
   it('never emits a beat at or past the duration', () => {
     const t = beatTimes(8, 120);
     expect(t.every((x) => x < 8)).toBe(true);
@@ -29,5 +44,7 @@ describe('beatTimes', () => {
     expect(beatTimes(0, 120)).toEqual([]);
     expect(beatTimes(8, 0)).toEqual([]);
     expect(beatTimes(-5, 120)).toEqual([]);
+    expect(beatTimes(8, Number.NaN)).toEqual([]);
+    expect(beatTimes(8, 120, Number.NaN)).toEqual([]);
   });
 });

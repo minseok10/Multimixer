@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import { engine } from '../state/useEngine';
 import { MasterMeter } from './Meter';
 import { formatTime } from '../audio/transport';
+import { MAX_DOWNBEAT_OFFSET_MS, MIN_DOWNBEAT_OFFSET_MS } from '../audio/AudioEngine';
 import type { LoopRegion } from '../audio/types';
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
   metronomeEnabled: boolean;
   metronomeBpm: number;
   metronomeVolume: number;
+  metronomeDownbeatOffset: string;
   metronomeBpmFromFile: boolean;
   onPlayPause: () => void;
   onStop: () => void;
@@ -31,6 +33,7 @@ interface Props {
   onExport: () => void;
   onMetronomeToggle: () => void;
   onMetronomeBpm: (v: number) => void;
+  onMetronomeDownbeatOffset: (value: string) => void;
   onMetronomeVolume: (v: number) => void;
 }
 
@@ -74,6 +77,7 @@ export function Transport({
   metronomeEnabled,
   metronomeBpm,
   metronomeVolume,
+  metronomeDownbeatOffset,
   metronomeBpmFromFile,
   onPlayPause,
   onStop,
@@ -83,6 +87,7 @@ export function Transport({
   onExport,
   onMetronomeToggle,
   onMetronomeBpm,
+  onMetronomeDownbeatOffset,
   onMetronomeVolume,
 }: Props) {
   return (
@@ -155,17 +160,27 @@ export function Transport({
             저장
           </span>
         )}
-        <input
-          className="bpm-slider"
-          type="range"
-          min={20}
-          max={300}
-          step={1}
-          value={metronomeBpm}
-          onChange={(e) => onMetronomeBpm(Number(e.target.value))}
-          disabled={!hasTracks}
-          aria-label="BPM 슬라이더"
-        />
+        <label className="downbeat-offset">
+          다운비트
+          <input
+            className="downbeat-number"
+            type="number"
+            min={MIN_DOWNBEAT_OFFSET_MS}
+            max={MAX_DOWNBEAT_OFFSET_MS}
+            step={1}
+            value={metronomeDownbeatOffset}
+            onChange={(e) => onMetronomeDownbeatOffset(e.target.value)}
+            disabled={!hasTracks}
+            aria-label="다운비트 보정"
+          />
+          <span>ms</span>
+        </label>
+        <span
+          className="downbeat-help"
+          title="+는 메트로놈 클릭을 늦게, -는 빠르게 맞춥니다."
+        >
+          + 클릭을 늦게 · − 클릭을 빠르게
+        </span>
         <input
           className="metro-vol"
           type="range"

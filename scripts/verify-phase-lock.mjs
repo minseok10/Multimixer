@@ -109,6 +109,25 @@ const metro = await page.evaluate(async () => {
 check('metronome shares tracks t0 (phase lock)', metro.ok, `track=${metro.trackStart} metro=${metro.metroStart}`);
 check('metronome start() has positive headroom (not late)', metro.latency !== null && metro.latency > 0, `latency=${metro.latency}`);
 
+const downbeatAdjustment = await page.evaluate(async () => {
+  const e = window.__mmEngine;
+  e.setMetronomeEnabled(true);
+  await e.play();
+  const trackStartsBefore = e.getDebugSchedule().sources.map((source) => source.scheduledStart);
+  e.setMetronomeDownbeatOffsetMs(37);
+  const scheduleAfter = e.getDebugSchedule();
+  const adjusted = e.getSnapshot().metronomeDownbeatOffsetMs;
+  e.clear();
+  return {
+    adjusted,
+    cleared: e.getSnapshot().metronomeDownbeatOffsetMs,
+    tracksUntouched: scheduleAfter.sources.every((source, index) => source.scheduledStart === trackStartsBefore[index]),
+    clickRescheduled: scheduleAfter.metronome.scheduledStart !== trackStartsBefore[0],
+  };
+});
+check('downbeat adjustment reschedules only the click', downbeatAdjustment.adjusted === 37 && downbeatAdjustment.tracksUntouched && downbeatAdjustment.clickRescheduled, JSON.stringify(downbeatAdjustment));
+check('downbeat offset is transient and clears with the song', downbeatAdjustment.cleared === 0, JSON.stringify(downbeatAdjustment));
+
 await browser.close();
 server.close();
 
