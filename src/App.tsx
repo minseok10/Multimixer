@@ -111,7 +111,7 @@ export default function App() {
       setView('mixer');
     } catch (e) {
       if (sequence !== songLoadSequence.current) return;
-      engine.clear();
+      engine.clearAndReleaseOutput();
       setSelectedSong(null);
       setView('library');
       setError(`노래 로드 실패: ${(e as Error).message}`);
@@ -129,7 +129,7 @@ export default function App() {
 
   const showLibrary = useCallback((navigate: boolean) => {
     songLoadSequence.current++;
-    engine.clear();
+    engine.clearAndReleaseOutput();
     setLoading(false);
     setError(null);
     setSelectedSong(null);

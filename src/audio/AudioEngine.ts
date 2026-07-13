@@ -65,6 +65,8 @@ export class AudioEngine {
   private limiter: DynamicsCompressorNode | null = null;
   /** Post-limiter tap for the master level meter. */
   private masterAnalyser: AnalyserNode | null = null;
+  /** A fresh context gets one real activation cycle on its first user gesture. */
+  private needsInitialActivation = false;
   /** Reusable scratch buffer for analyser peak reads. */
   private meterBuf = new Float32Array(METER_FFT);
 
@@ -136,6 +138,7 @@ export class AudioEngine {
     this.limiter = limiter;
     this.masterAnalyser = masterAnalyser;
     this.metronomeGain = metroGain;
+    this.needsInitialActivation = true;
     return ctx;
   }
 
@@ -146,10 +149,15 @@ export class AudioEngine {
   /** Must be called from a user gesture before audio can start. */
   async resume(): Promise<void> {
     const ctx = this.getContext();
-    if (ctx.state !== 'running') {
-      // iOS Safari can report a resumed context while its output remains
-      // gesture-locked. Queueing a silent source synchronously in the tap that
-      // called this method reliably primes the hardware audio output.
+    // Safari may keep a newly-created context in "running" while its hardware
+    // output is still stale. Force one real suspend/resume cycle, but only for
+    // a fresh context and only from a user gesture.
+    if (this.needsInitialActivation && (ctx.state as string) === 'running') {
+      await ctx.suspend();
+    }
+    if ((ctx.state as string) !== 'running') {
+      // Queue a silent source synchronously in the same tap before resume so
+      // iOS/macOS Safari primes its hardware output.
       const source = ctx.createBufferSource();
       source.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
       source.connect(ctx.destination);
@@ -157,8 +165,21 @@ export class AudioEngine {
       await ctx.resume();
     }
     if ((ctx.state as string) !== 'running') {
-      throw new Error('오디오 출력을 시작하지 못했습니다. iPhone의 무음 모드를 해제하고 다시 눌러주세요.');
+      throw new Error('오디오 출력을 시작하지 못했습니다. Safari에서 다시 재생해 주세요.');
     }
+    this.needsInitialActivation = false;
+  }
+
+  /** Drop Safari's hardware output after tracks have been cleared. */
+  private releaseContext(): void {
+    const ctx = this.ctx;
+    this.ctx = null;
+    this.masterGain = null;
+    this.limiter = null;
+    this.masterAnalyser = null;
+    this.metronomeGain = null;
+    this.needsInitialActivation = false;
+    if (ctx) void ctx.close().catch(() => undefined);
   }
 
   // ---- Loading -----------------------------------------------------------
@@ -246,6 +267,12 @@ export class AudioEngine {
     this.loop = null;
     this.loopEnabled = false;
     this.notify();
+  }
+
+  /** Leave the mixer and ensure a later song uses a fresh Safari output. */
+  clearAndReleaseOutput(): void {
+    this.clear();
+    this.releaseContext();
   }
 
   /**
@@ -736,8 +763,7 @@ export class AudioEngine {
 
   dispose(): void {
     this.teardownSources();
-    if (this.ctx) void this.ctx.close();
-    this.ctx = null;
+    this.releaseContext();
     this.listeners.clear();
   }
 }
