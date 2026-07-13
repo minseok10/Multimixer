@@ -6,9 +6,6 @@
 
 가장 중요한 설계 목표는 **트랙 간 드리프트·위상 어긋남이 절대 없어야 한다**는 것입니다.
 
-[배포된 Multimixer 바로 사용하기](https://multimixer.mshkshin1029.workers.dev/) ·
-[GitHub 저장소](https://github.com/minseok10/Multimixer)
-
 ![Multimixer 노래 선택 화면](docs/screenshots/song-library.jpg)
 
 ## 주요 기능
