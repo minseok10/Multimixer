@@ -274,7 +274,21 @@ export default function App() {
         </section>
       )}
 
-      {loading && !hasTracks && <div className="mixer-loading">노래의 스템을 준비하는 중…</div>}
+      {loading && !hasTracks && (
+        <div className="mixer-loading" role="status" aria-live="polite">
+          <strong className="mixer-loading-title">
+            노래의 스템을 준비하는 중
+            <span className="mixer-loading-dots" aria-hidden="true">
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </span>
+          </strong>
+          <span className="mixer-loading-detail">
+            오디오 파일을 내려받고 재생할 수 있도록 준비하고 있습니다.
+          </span>
+        </div>
+      )}
 
       <Transport
         isPlaying={state.isPlaying}
