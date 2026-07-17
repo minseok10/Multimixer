@@ -27,8 +27,12 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [editName, setEditName] = useState('');
   const [editBpm, setEditBpm] = useState('120');
+  const [deleteTarget, setDeleteTarget] = useState<Song | null>(null);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editFormRef = useRef<HTMLFormElement>(null);
+  const deletePasswordRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -52,6 +56,26 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     const frame = requestAnimationFrame(() => editFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [editingSong]);
+
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const frame = requestAnimationFrame(() => deletePasswordRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !uploading) {
+        setDeleteTarget(null);
+        setDeletePassword('');
+        setDeleteError(null);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [deleteTarget, uploading]);
 
   const chooseFiles = (next: File[]) => {
     setFiles(next);
@@ -130,26 +154,40 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     }
   };
 
-  const remove = async (song: Song) => {
-    if (!password) {
-      setError('삭제하려면 관리자 비밀번호를 입력하세요.');
-      setAdminOpen(true);
-      return;
-    }
-    if (!window.confirm(`“${song.name}”을 삭제할까요?`)) return;
-    setUploading(true);
+  const requestDelete = (song: Song) => {
+    setDeleteTarget(song);
+    setDeletePassword('');
+    setDeleteError(null);
     setError(null);
+  };
+
+  const closeDelete = () => {
+    if (uploading) return;
+    setDeleteTarget(null);
+    setDeletePassword('');
+    setDeleteError(null);
+  };
+
+  const remove = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!deleteTarget || !deletePassword) return;
+    const song = deleteTarget;
+    setUploading(true);
+    setDeleteError(null);
     try {
       const response = await fetch(`/api/admin/songs/${encodeURIComponent(song.id)}`, {
         method: 'DELETE',
-        headers: { Authorization: basicAuthorization(password) },
+        headers: { Authorization: basicAuthorization(deletePassword) },
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || '삭제에 실패했습니다.');
       if (editingSong?.id === song.id) setEditingSong(null);
+      setDeleteTarget(null);
+      setDeletePassword('');
       await load();
     } catch (cause) {
-      setError((cause as Error).message);
+      setDeleteError((cause as Error).message);
+      requestAnimationFrame(() => deletePasswordRef.current?.select());
     } finally {
       setUploading(false);
     }
@@ -221,7 +259,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
                 </button>
                 <button
                   className="song-delete"
-                  onClick={() => void remove(song)}
+                  onClick={() => requestDelete(song)}
                   disabled={uploading}
                   aria-label={`${song.name} 삭제`}
                 >
@@ -352,6 +390,56 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
             {uploading ? uploadProgress || '업로드 중…' : `${files.length || ''}개 스템을 R2에 업로드`}
           </button>
         </form>
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && closeDelete()}>
+          <form
+            className="delete-song-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-song-title"
+            aria-describedby="delete-song-description"
+            onSubmit={(event) => void remove(event)}
+          >
+            <div className="modal-heading">
+              <div>
+                <span className="delete-modal-eyebrow">DELETE SONG</span>
+                <h2 id="delete-song-title">“{deleteTarget.name}” 삭제</h2>
+              </div>
+              <button type="button" className="modal-close" onClick={closeDelete} disabled={uploading} aria-label="삭제 창 닫기">×</button>
+            </div>
+
+            <p id="delete-song-description" className="delete-modal-copy">
+              이 노래와 모든 스템이 저장소에서 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
+            </p>
+
+            <label className="delete-password-field">
+              관리자 비밀번호
+              <input
+                ref={deletePasswordRef}
+                type="password"
+                value={deletePassword}
+                onChange={(event) => {
+                  setDeletePassword(event.target.value);
+                  setDeleteError(null);
+                }}
+                autoComplete="current-password"
+                maxLength={256}
+                required
+              />
+            </label>
+
+            {deleteError && <div className="inline-error" role="alert">{deleteError}</div>}
+
+            <div className="delete-modal-actions">
+              <button type="button" className="btn secondary" onClick={closeDelete} disabled={uploading}>취소</button>
+              <button className="btn delete-confirm" disabled={!deletePassword || uploading}>
+                {uploading ? '삭제 중…' : '노래 삭제'}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </main>
   );

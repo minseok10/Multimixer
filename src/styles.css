@@ -543,6 +543,51 @@ body {
   display: flex;
   gap: 8px;
 }
+.delete-song-modal {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+.delete-modal-eyebrow {
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+.delete-modal-copy {
+  margin: 18px 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.delete-password-field {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.delete-password-field input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 10px;
+}
+.delete-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.btn.delete-confirm {
+  background: var(--danger);
+  color: #fff;
+}
 
 /* Transport ---------------------------------------------------------------- */
 .transport {
@@ -1074,6 +1119,9 @@ body {
     justify-content: center;
   }
   .creator-modal {
+    padding: 18px;
+  }
+  .delete-song-modal {
     padding: 18px;
   }
   .comments-heading {
