@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { groupSongsByFolder, type Song, type SongFolder } from './library';
+import {
+  formatMixerSongTitle,
+  groupSongsByFolder,
+  resolveSongFolderName,
+  type Song,
+  type SongFolder,
+} from './library';
 
 const folders: SongFolder[] = [
   { id: 'folder-a', name: '공연 준비', createdAt: '2026-07-01T00:00:00.000Z' },
@@ -39,5 +45,17 @@ describe('groupSongsByFolder', () => {
   it('omits 미분류 when every song belongs to a known folder', () => {
     const groups = groupSongsByFolder([song('one', 'folder-a')], folders);
     expect(groups.map(({ key }) => key)).toEqual(['folder-a', 'folder-b']);
+  });
+});
+
+describe('mixer song title', () => {
+  it('shows the folder name before the song name', () => {
+    expect(formatMixerSongTitle({ name: '여름밤', folderName: '공연 준비' })).toBe('공연 준비/여름밤');
+  });
+
+  it('uses 미분류 for legacy and orphaned songs', () => {
+    expect(resolveSongFolderName(song('legacy'), folders)).toBe('미분류');
+    expect(resolveSongFolderName(song('orphaned', 'missing-folder'), folders)).toBe('미분류');
+    expect(formatMixerSongTitle({ name: 'legacy' })).toBe('미분류/legacy');
   });
 });

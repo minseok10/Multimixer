@@ -364,7 +364,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
                     <article key={song.id} className="song-card">
                       <button
                         className="song-select"
-                        onClick={() => onSelectSong(song)}
+                        onClick={() => onSelectSong({ ...song, folderName: folder.name })}
                         disabled={busy || uploading}
                       >
                         <span className="song-number">{String(songNumbers.get(song.id) ?? 0).padStart(2, '0')}</span>

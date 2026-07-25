@@ -18,7 +18,13 @@ import { buildDemoStems } from './audio/demoStems';
 import { renderMix, encodeWav } from './audio/mixdown';
 import { readBpm } from './audio/readBpm';
 import type { LoopRegion } from './audio/types';
-import { fetchSongDetailById, type Song } from './library';
+import {
+  fetchSongDetailById,
+  fetchSongLibrary,
+  formatMixerSongTitle,
+  resolveSongFolderName,
+  type Song,
+} from './library';
 import { songIdFromPath, songPath } from './routes';
 
 export default function App() {
@@ -99,7 +105,12 @@ export default function App() {
   }, []);
   const onMetronomeVolume = useCallback((v: number) => engine.setMetronomeVolume(v), []);
 
-  const loadSongById = useCallback(async (songId: string, resumeFromGesture: boolean, navigate: boolean) => {
+  const loadSongById = useCallback(async (
+    songId: string,
+    resumeFromGesture: boolean,
+    navigate: boolean,
+    knownFolderName?: string,
+  ) => {
     const sequence = ++songLoadSequence.current;
     setError(null);
     setLoading(true);
@@ -109,9 +120,15 @@ export default function App() {
       // A clicked song primes iOS audio immediately. Direct URLs decode while
       // suspended and resume later from the user's play gesture.
       if (resumeFromGesture) await engine.resume();
-      const detail = await fetchSongDetailById(songId);
+      const [detail, library] = await Promise.all([
+        fetchSongDetailById(songId),
+        knownFolderName ? Promise.resolve(null) : fetchSongLibrary().catch(() => null),
+      ]);
       if (sequence !== songLoadSequence.current) return;
-      setSelectedSong(detail);
+      setSelectedSong({
+        ...detail,
+        folderName: knownFolderName ?? resolveSongFolderName(detail, library?.folders),
+      });
       const downloaded = await Promise.all(detail.stems.map(async (stem) => {
         const response = await fetch(stem.url);
         if (!response.ok) throw new Error(`${stem.name} 스템을 내려받지 못했습니다.`);
@@ -138,7 +155,7 @@ export default function App() {
   }, []);
 
   const onSelectSong = useCallback(async (song: Song) => {
-    await loadSongById(song.id, true, true);
+    await loadSongById(song.id, true, true, song.folderName);
   }, [loadSongById]);
 
   const showLibrary = useCallback((navigate: boolean) => {
@@ -282,7 +299,7 @@ export default function App() {
         <section className="mixer-song-heading" aria-labelledby="mixer-song-title">
           <div>
             <span>NOW MIXING</span>
-            <h2 id="mixer-song-title">{selectedSong.name}</h2>
+            <h2 id="mixer-song-title">{formatMixerSongTitle(selectedSong)}</h2>
           </div>
           {selectedSong.bpm && <strong>{selectedSong.bpm} BPM</strong>}
         </section>

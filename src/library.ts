@@ -3,6 +3,7 @@ export interface Song {
   name: string;
   bpm?: number;
   folderId?: string;
+  folderName?: string;
   size: number;
   stemCount: number;
   uploadedAt: string;
@@ -118,6 +119,14 @@ export function groupSongsByFolder(songs: Song[], folders: SongFolder[] = []): S
   const unfiled = songs.filter((song) => !song.folderId || !folderIds.has(song.folderId));
   if (unfiled.length > 0) groups.push({ key: 'unfiled', name: '미분류', songs: unfiled });
   return groups;
+}
+
+export function resolveSongFolderName(song: Song, folders: SongFolder[] = []): string {
+  return folders.find((folder) => folder.id === song.folderId)?.name ?? '미분류';
+}
+
+export function formatMixerSongTitle(song: Pick<Song, 'name' | 'folderName'>): string {
+  return `${song.folderName ?? '미분류'}/${song.name}`;
 }
 
 export async function fetchCreatorNote(signal?: AbortSignal): Promise<CreatorNote> {
