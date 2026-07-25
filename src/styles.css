@@ -388,13 +388,73 @@ body {
   margin-bottom: 16px;
 }
 .library-heading h2,
-.admin-upload h3 {
+.admin-upload h3,
+.admin-folder-create h3 {
   margin: 0;
 }
 .library-heading p,
-.admin-upload p {
+.admin-upload p,
+.admin-folder-create p {
   margin: 5px 0 0;
   color: var(--muted);
+}
+.song-folders {
+  display: grid;
+  gap: 10px;
+}
+.song-folder {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.song-folder.expanded {
+  border-color: var(--accent-dim);
+}
+.folder-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 15px 17px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  font: inherit;
+}
+.folder-toggle:hover {
+  background: var(--panel-2);
+}
+.folder-icon {
+  width: 16px;
+  color: var(--accent);
+  font-size: 15px;
+}
+.folder-name {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.folder-song-grid {
+  padding: 0 12px 12px;
+}
+.empty-folder {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 14px 4px 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.custom-upload-grid {
+  margin-top: 12px;
 }
 .song-grid {
   display: grid;
@@ -496,7 +556,8 @@ body {
   font-size: 12px;
 }
 .admin-upload,
-.admin-song-edit {
+.admin-song-edit,
+.admin-folder-create {
   margin-top: 18px;
   padding: 18px;
   border: 1px solid var(--border);
@@ -508,13 +569,20 @@ body {
   gap: 12px;
 }
 .admin-song-edit {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+}
+.admin-folder-create {
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+.admin-folder-create > div {
+  align-self: center;
 }
 .admin-upload-heading {
   grid-column: 1 / -1;
 }
 .admin-upload label,
-.admin-song-edit label {
+.admin-song-edit label,
+.admin-folder-create label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -522,7 +590,10 @@ body {
   font-size: 12px;
 }
 .admin-upload input,
-.admin-song-edit input {
+.admin-song-edit input,
+.admin-folder-create input,
+.admin-upload select,
+.admin-song-edit select {
   min-width: 0;
   width: 100%;
   border: 1px solid var(--border);
@@ -1129,7 +1200,8 @@ body {
     flex-direction: column;
   }
   .admin-upload,
-  .admin-song-edit {
+  .admin-song-edit,
+  .admin-folder-create {
     grid-template-columns: 1fr;
   }
   .admin-upload-heading {

@@ -6,10 +6,12 @@ const MAX_SONGS = 200;
 const MAX_STEMS = 16;
 const LIST_CACHE_SECONDS = 60;
 const CREATOR_NOTE_KEY = 'site/creator-note.json';
+const SONG_FOLDERS_KEY = 'site/song-folders.json';
 const COMMENT_PREFIX = 'comments/';
 const MAX_CREATOR_NOTE_LENGTH = 5000;
 const MAX_COMMENT_LENGTH = 1000;
 const MAX_COMMENTS_PER_SONG = 100;
+const MAX_FOLDERS = 50;
 
 const AUDIO_TYPES: Record<string, string> = {
   wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', flac: 'audio/flac',
@@ -28,15 +30,23 @@ interface SongManifest {
   id: string;
   name: string;
   bpm?: number;
+  folderId?: string;
   status: 'draft' | 'complete';
   createdAt: string;
   stems: StemRecord[];
+}
+
+interface SongFolder {
+  id: string;
+  name: string;
+  createdAt: string;
 }
 
 interface SongRecord {
   id: string;
   name: string;
   bpm?: number;
+  folderId?: string;
   size: number;
   stemCount: number;
   uploadedAt: string;
@@ -79,6 +89,11 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/songs') {
         return await listSongs(request, env, ctx);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/admin/folders') {
+        await requireAdmin(request, env);
+        return await createFolder(request, env);
       }
 
       const commentsMatch = url.pathname.match(/^\/api\/songs\/([^/]+)\/comments$/);
@@ -143,14 +158,17 @@ async function listSongs(request: Request, env: Env, ctx: ExecutionContext): Pro
   const cached = await caches.default.match(cacheKey);
   if (cached) return cached;
 
-  const objects = await listAllObjects(env.SONGS, SONG_PREFIX, true);
+  const [objects, folders] = await Promise.all([
+    listAllObjects(env.SONGS, SONG_PREFIX, true),
+    readFolders(env.SONGS),
+  ]);
   const songs = objects
     .filter((object) => object.key.endsWith(`/${MANIFEST_FILE}`) && object.customMetadata?.status === 'complete')
     .map(toSongRecord)
     .sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt));
   const totalBytes = objects.reduce((sum, object) => sum + object.size, 0);
   const response = json({
-    songs, totalBytes,
+    songs, folders, totalBytes,
     limits: { maxStemBytes: MAX_STEM_BYTES, maxTotalBytes: MAX_TOTAL_BYTES, maxSongs: MAX_SONGS, maxStems: MAX_STEMS },
   });
   response.headers.set('Cache-Control', `public, max-age=0, s-maxage=${LIST_CACHE_SECONDS}`);
@@ -168,9 +186,11 @@ async function createSong(request: Request, env: Env): Promise<Response> {
   const manifests = (await listAllObjects(env.SONGS, SONG_PREFIX, true))
     .filter((object) => object.key.endsWith(`/${MANIFEST_FILE}`));
   if (manifests.length >= MAX_SONGS) throw new HttpError(507, `노래는 최대 ${MAX_SONGS}개까지 저장할 수 있습니다.`);
+  const folderId = isRecord(body) ? await readFolderSelection(env.SONGS, body.folderId) : undefined;
 
   const manifest: SongManifest = {
-    id: crypto.randomUUID(), name, bpm, status: 'draft', createdAt: new Date().toISOString(), stems: [],
+    id: crypto.randomUUID(), name, bpm, ...(folderId ? { folderId } : {}),
+    status: 'draft', createdAt: new Date().toISOString(), stems: [],
   };
   await putManifest(env.SONGS, manifest);
   return json({ song: manifest }, 201);
@@ -258,20 +278,43 @@ async function deleteSong(request: Request, env: Env, encodedSongId: string): Pr
 async function updateSongDetails(request: Request, env: Env, encodedSongId: string): Promise<Response> {
   const songId = validateId(encodedSongId, '노래');
   const body = await readJsonBody(request, 4096, '노래 정보');
-  const name = cleanText(isRecord(body) && typeof body.name === 'string' ? body.name : null, 120, '노래 이름');
-  const bpm = isRecord(body) ? body.bpm : undefined;
+  if (!isRecord(body)) throw new HttpError(400, '올바른 노래 정보가 필요합니다.');
+  const name = cleanText(typeof body.name === 'string' ? body.name : null, 120, '노래 이름');
+  const bpm = body.bpm;
   if (typeof bpm !== 'number' || !Number.isInteger(bpm) || bpm < 20 || bpm > 300) {
     throw new HttpError(400, 'BPM은 20에서 300 사이의 정수여야 합니다.');
   }
+  const hasFolderSelection = Object.hasOwn(body, 'folderId');
+  const folderId = hasFolderSelection ? await readFolderSelection(env.SONGS, body.folderId) : undefined;
 
   const manifest = await readManifest(env.SONGS, songId);
   if (manifest.status !== 'complete') throw new HttpError(409, '공개가 완료된 노래만 수정할 수 있습니다.');
   manifest.name = name;
   manifest.bpm = bpm;
+  if (hasFolderSelection) {
+    if (folderId) manifest.folderId = folderId;
+    else delete manifest.folderId;
+  }
   await putManifest(env.SONGS, manifest);
   await invalidateSongListCache(request);
-  console.log(JSON.stringify({ message: 'song metadata updated', id: songId, name, bpm }));
+  console.log(JSON.stringify({ message: 'song metadata updated', id: songId, name, bpm, folderId: manifest.folderId ?? null }));
   return json({ song: toSongDetail(manifest) });
+}
+
+async function createFolder(request: Request, env: Env): Promise<Response> {
+  const body = await readJsonBody(request, 4096, '폴더 정보');
+  const name = cleanText(isRecord(body) && typeof body.name === 'string' ? body.name : null, 80, '폴더 이름');
+  const folders = await readFolders(env.SONGS);
+  if (folders.length >= MAX_FOLDERS) throw new HttpError(507, `폴더는 최대 ${MAX_FOLDERS}개까지 만들 수 있습니다.`);
+  if (folders.some((folder) => folder.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0)) {
+    throw new HttpError(409, '같은 이름의 폴더가 이미 있습니다.');
+  }
+  const folder: SongFolder = { id: crypto.randomUUID(), name, createdAt: new Date().toISOString() };
+  folders.push(folder);
+  await putFolders(env.SONGS, folders);
+  await invalidateSongListCache(request);
+  console.log(JSON.stringify({ message: 'song folder created', id: folder.id, name }));
+  return json({ folder }, 201);
 }
 
 async function getCreatorNote(env: Env): Promise<Response> {
@@ -397,10 +440,37 @@ async function putManifest(bucket: R2Bucket, manifest: SongManifest): Promise<vo
     customMetadata: {
       kind: 'manifest', status: manifest.status, displayName: manifest.name,
       ...(manifest.bpm ? { bpm: String(manifest.bpm) } : {}),
+      ...(manifest.folderId ? { folderId: manifest.folderId } : {}),
       stemCount: String(manifest.stems.length), totalBytes: String(manifest.stems.reduce((sum, stem) => sum + stem.size, 0)),
       createdAt: manifest.createdAt,
     }, storageClass: 'Standard',
   });
+}
+
+async function readFolders(bucket: R2Bucket): Promise<SongFolder[]> {
+  const object = await bucket.get(SONG_FOLDERS_KEY);
+  if (!object) return [];
+  const value: unknown = await object.json();
+  if (!Array.isArray(value) || !value.every(isSongFolder)) {
+    throw new HttpError(500, '저장된 폴더 정보가 올바르지 않습니다.');
+  }
+  return value;
+}
+
+async function putFolders(bucket: R2Bucket, folders: SongFolder[]): Promise<void> {
+  await bucket.put(SONG_FOLDERS_KEY, JSON.stringify(folders), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { kind: 'song-folders', folderCount: String(folders.length) },
+    storageClass: 'Standard',
+  });
+}
+
+async function readFolderSelection(bucket: R2Bucket, value: unknown): Promise<string | undefined> {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || !isUuid(value)) throw new HttpError(400, '잘못된 폴더 식별자입니다.');
+  const folders = await readFolders(bucket);
+  if (!folders.some((folder) => folder.id === value)) throw new HttpError(400, '선택한 폴더를 찾을 수 없습니다.');
+  return value;
 }
 
 async function listAllObjects(bucket: R2Bucket, prefix: string, metadata = false): Promise<R2Object[]> {
@@ -419,6 +489,7 @@ function toSongRecord(object: R2Object): SongRecord {
   return {
     id, name: object.customMetadata?.displayName || id,
     ...(object.customMetadata?.bpm ? { bpm: Number(object.customMetadata.bpm) } : {}),
+    ...(object.customMetadata?.folderId ? { folderId: object.customMetadata.folderId } : {}),
     size: Number(object.customMetadata?.totalBytes || 0),
     stemCount: Number(object.customMetadata?.stemCount || 0),
     uploadedAt: object.customMetadata?.createdAt || object.uploaded.toISOString(),
@@ -431,6 +502,7 @@ function toSongDetail(manifest: SongManifest): SongDetailRecord {
     id: manifest.id,
     name: manifest.name,
     ...(manifest.bpm ? { bpm: manifest.bpm } : {}),
+    ...(manifest.folderId ? { folderId: manifest.folderId } : {}),
     size: manifest.stems.reduce((sum, stem) => sum + stem.size, 0),
     stemCount: manifest.stems.length,
     uploadedAt: manifest.createdAt,
@@ -447,8 +519,12 @@ function commentKey(songId: string, commentId: string): string { return `${comme
 function validateId(encodedId: string, label: string): string {
   let id: string;
   try { id = decodeURIComponent(encodedId); } catch { throw new HttpError(400, `잘못된 ${label} 식별자입니다.`); }
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw new HttpError(400, `잘못된 ${label} 식별자입니다.`);
+  if (!isUuid(id)) throw new HttpError(400, `잘못된 ${label} 식별자입니다.`);
   return id;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f-]{36}$/.test(value);
 }
 
 function validateStemId(encodedId: string): string {
@@ -467,9 +543,15 @@ function isSongComment(value: unknown): value is SongComment {
   return isRecord(value) && typeof value.id === 'string' && typeof value.content === 'string'
     && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string';
 }
+function isSongFolder(value: unknown): value is SongFolder {
+  return isRecord(value) && typeof value.id === 'string' && isUuid(value.id)
+    && typeof value.name === 'string' && value.name.length > 0 && value.name.length <= 80
+    && typeof value.createdAt === 'string';
+}
 function isManifest(value: unknown): value is SongManifest {
   return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string'
     && (value.bpm === undefined || (typeof value.bpm === 'number' && Number.isInteger(value.bpm) && value.bpm >= 20 && value.bpm <= 300))
+    && (value.folderId === undefined || (typeof value.folderId === 'string' && isUuid(value.folderId)))
     && (value.status === 'draft' || value.status === 'complete') && typeof value.createdAt === 'string'
     && Array.isArray(value.stems) && value.stems.every((stem) => isRecord(stem)
       && typeof stem.id === 'string' && typeof stem.name === 'string' && typeof stem.fileName === 'string'

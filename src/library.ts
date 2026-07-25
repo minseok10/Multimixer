@@ -2,10 +2,23 @@ export interface Song {
   id: string;
   name: string;
   bpm?: number;
+  folderId?: string;
   size: number;
   stemCount: number;
   uploadedAt: string;
   url: string;
+}
+
+export interface SongFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface SongFolderGroup {
+  key: string;
+  name: string;
+  songs: Song[];
 }
 
 export interface SongStem {
@@ -22,6 +35,7 @@ export interface SongDetail extends Song {
 
 export interface SongLibraryData {
   songs: Song[];
+  folders?: SongFolder[];
   totalBytes: number;
   limits: {
     maxStemBytes: number;
@@ -56,15 +70,44 @@ export async function fetchSongLibrary(signal?: AbortSignal): Promise<SongLibrar
   return response.json() as Promise<SongLibraryData>;
 }
 
-export async function updateSongMetadata(password: string, songId: string, name: string, bpm: number): Promise<Song> {
+export async function createSongFolder(password: string, name: string): Promise<SongFolder> {
+  const response = await fetch('/api/admin/folders', {
+    method: 'POST',
+    headers: { Authorization: basicAuthorization(password), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const result = await response.json() as { folder?: SongFolder; error?: string };
+  if (!response.ok || !result.folder) throw new Error(result.error || '폴더를 만들지 못했습니다.');
+  return result.folder;
+}
+
+export async function updateSongMetadata(
+  password: string,
+  songId: string,
+  name: string,
+  bpm: number,
+  folderId: string | null,
+): Promise<Song> {
   const response = await fetch(`/api/admin/songs/${encodeURIComponent(songId)}`, {
     method: 'PATCH',
     headers: { Authorization: basicAuthorization(password), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, bpm }),
+    body: JSON.stringify({ name, bpm, folderId }),
   });
   const result = await response.json() as { song?: Song; error?: string };
   if (!response.ok || !result.song) throw new Error(result.error || '노래 정보를 수정하지 못했습니다.');
   return result.song;
+}
+
+export function groupSongsByFolder(songs: Song[], folders: SongFolder[] = []): SongFolderGroup[] {
+  const folderIds = new Set(folders.map((folder) => folder.id));
+  const groups = folders.map((folder) => ({
+    key: folder.id,
+    name: folder.name,
+    songs: songs.filter((song) => song.folderId === folder.id),
+  }));
+  const unfiled = songs.filter((song) => !song.folderId || !folderIds.has(song.folderId));
+  if (unfiled.length > 0) groups.push({ key: 'unfiled', name: '미분류', songs: unfiled });
+  return groups;
 }
 
 export async function fetchCreatorNote(signal?: AbortSignal): Promise<CreatorNote> {

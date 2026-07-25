@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   basicAuthorization,
+  createSongFolder,
   fetchSongLibrary,
   formatBytes,
+  groupSongsByFolder,
   updateSongMetadata,
   type Song,
   type SongLibraryData,
@@ -21,12 +23,17 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [songBpm, setSongBpm] = useState('120');
+  const [uploadFolderId, setUploadFolderId] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [editName, setEditName] = useState('');
   const [editBpm, setEditBpm] = useState('120');
+  const [editFolderId, setEditFolderId] = useState('');
+  const [folderName, setFolderName] = useState('');
+  const [folderPassword, setFolderPassword] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
   const [deleteTarget, setDeleteTarget] = useState<Song | null>(null);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -89,9 +96,12 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       setPassword('');
       setDisplayName('');
       setSongBpm('120');
+      setUploadFolderId('');
       setFiles([]);
       setUploadProgress('');
       setEditingSong(null);
+      setFolderName('');
+      setFolderPassword('');
       if (inputRef.current) inputRef.current.value = '';
     }
     setAdminOpen((open) => !open);
@@ -110,7 +120,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       const createResponse = await fetch('/api/admin/songs', {
         method: 'POST',
         headers: { Authorization: authorization, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: displayName.trim(), bpm }),
+        body: JSON.stringify({ name: displayName.trim(), bpm, folderId: uploadFolderId || null }),
       });
       const createResult = await createResponse.json() as { song?: { id: string }; error?: string };
       if (!createResponse.ok || !createResult.song) throw new Error(createResult.error || '노래 묶음을 만들지 못했습니다.');
@@ -140,6 +150,11 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       setFiles([]);
       setPassword('');
       setUploadProgress('');
+      if (uploadFolderId) {
+        setExpandedFolders((current) => new Set(current).add(uploadFolderId));
+      } else {
+        setExpandedFolders((current) => new Set(current).add('unfiled'));
+      }
       if (inputRef.current) inputRef.current.value = '';
       await load();
     } catch (cause) {
@@ -197,6 +212,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     setEditingSong(song);
     setEditName(song.name);
     setEditBpm(String(song.bpm ?? 120));
+    setEditFolderId(song.folderId ?? '');
     setError(null);
   };
 
@@ -208,10 +224,12 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     setUploading(true);
     setError(null);
     try {
-      await updateSongMetadata(password, editingSong.id, editName.trim(), bpm);
+      await updateSongMetadata(password, editingSong.id, editName.trim(), bpm, editFolderId || null);
+      setExpandedFolders((current) => new Set(current).add(editFolderId || 'unfiled'));
       setEditingSong(null);
       setEditName('');
       setEditBpm('120');
+      setEditFolderId('');
       setPassword('');
       await load();
     } catch (cause) {
@@ -220,6 +238,37 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       setUploading(false);
     }
   };
+
+  const addFolder = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!folderPassword || !folderName.trim()) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const folder = await createSongFolder(folderPassword, folderName.trim());
+      setFolderName('');
+      setFolderPassword('');
+      setUploadFolderId(folder.id);
+      setExpandedFolders((current) => new Set(current).add(folder.id));
+      await load();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const toggleFolder = (folderKey: string) => {
+    setExpandedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(folderKey)) next.delete(folderKey);
+      else next.add(folderKey);
+      return next;
+    });
+  };
+
+  const folderGroups = data ? groupSongsByFolder(data.songs, data.folders ?? []) : [];
+  const songNumbers = new Map(data?.songs.map((song, index) => [song.id, index + 1]) ?? []);
 
   return (
     <main className="library">
@@ -235,41 +284,67 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
 
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="song-grid" aria-busy={!data || busy}>
-        {data?.songs.map((song, index) => (
-          <article key={song.id} className="song-card">
-            <button
-              className="song-select"
-              onClick={() => onSelectSong(song)}
-              disabled={busy || uploading}
-            >
-              <span className="song-number">{String(index + 1).padStart(2, '0')}</span>
-              <span className="song-name">{song.name}</span>
-              <span className="song-meta">{song.stemCount} stems · {song.bpm ? `${song.bpm} BPM · ` : ''}{formatBytes(song.size)}</span>
-            </button>
-            {adminOpen && (
-              <div className="song-admin-actions">
-                <button
-                  className="song-edit"
-                  onClick={() => beginEdit(song)}
-                  disabled={uploading}
-                  aria-label={`${song.name} 정보 수정`}
-                >
-                  수정
-                </button>
-                <button
-                  className="song-delete"
-                  onClick={() => requestDelete(song)}
-                  disabled={uploading}
-                  aria-label={`${song.name} 삭제`}
-                >
-                  삭제
-                </button>
-              </div>
-            )}
-          </article>
-        ))}
+      <div className="song-folders" aria-busy={!data || busy}>
+        {folderGroups.map((folder) => {
+          const expanded = expandedFolders.has(folder.key);
+          const panelId = `folder-${folder.key}`;
+          return (
+            <section key={folder.key} className={`song-folder${expanded ? ' expanded' : ''}`}>
+              <button
+                className="folder-toggle"
+                type="button"
+                onClick={() => toggleFolder(folder.key)}
+                aria-expanded={expanded}
+                aria-controls={panelId}
+              >
+                <span className="folder-icon" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+                <span className="folder-name">{folder.name}</span>
+                <span className="folder-count">{folder.songs.length}곡</span>
+              </button>
+              {expanded && (
+                <div id={panelId} className="song-grid folder-song-grid">
+                  {folder.songs.map((song) => (
+                    <article key={song.id} className="song-card">
+                      <button
+                        className="song-select"
+                        onClick={() => onSelectSong(song)}
+                        disabled={busy || uploading}
+                      >
+                        <span className="song-number">{String(songNumbers.get(song.id) ?? 0).padStart(2, '0')}</span>
+                        <span className="song-name">{song.name}</span>
+                        <span className="song-meta">{song.stemCount} stems · {song.bpm ? `${song.bpm} BPM · ` : ''}{formatBytes(song.size)}</span>
+                      </button>
+                      {adminOpen && (
+                        <div className="song-admin-actions">
+                          <button
+                            className="song-edit"
+                            onClick={() => beginEdit(song)}
+                            disabled={uploading}
+                            aria-label={`${song.name} 정보 수정`}
+                          >
+                            수정
+                          </button>
+                          <button
+                            className="song-delete"
+                            onClick={() => requestDelete(song)}
+                            disabled={uploading}
+                            aria-label={`${song.name} 삭제`}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                  {folder.songs.length === 0 && <p className="empty-folder">아직 이 폴더에 곡이 없습니다.</p>}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
 
+      <div className="song-grid custom-upload-grid">
         <button className="song-card custom-song" onClick={onCustomUpload} disabled={busy}>
           <span className="custom-plus">＋</span>
           <span className="song-name">Custom Upload</span>
@@ -289,7 +364,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
           <div className="admin-upload-heading">
             <div>
               <h3>노래 정보 수정</h3>
-              <p>스템은 그대로 두고 표시 제목과 BPM만 R2 manifest에서 수정합니다.</p>
+              <p>스템은 그대로 두고 제목, BPM, 폴더를 수정합니다.</p>
             </div>
           </div>
           <label>
@@ -320,15 +395,55 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
               required
             />
           </label>
+          <label>
+            폴더
+            <select value={editFolderId} onChange={(event) => setEditFolderId(event.target.value)}>
+              <option value="">미분류</option>
+              {(data.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+            </select>
+          </label>
           <div className="admin-edit-actions">
             <button type="button" className="btn secondary" onClick={() => {
               setEditingSong(null);
               setPassword('');
             }} disabled={uploading}>취소</button>
             <button className="btn" disabled={!password || !editName.trim() || !Number.isInteger(Number(editBpm)) || Number(editBpm) < 20 || Number(editBpm) > 300 || uploading}>
-              {uploading ? '수정 중…' : '제목과 BPM 저장'}
+              {uploading ? '수정 중…' : '노래 정보 저장'}
             </button>
           </div>
+        </form>
+      )}
+
+      {adminOpen && data && !editingSong && (
+        <form className="admin-folder-create" onSubmit={(event) => void addFolder(event)}>
+          <div>
+            <h3>새 폴더 만들기</h3>
+            <p>만든 폴더는 바로 아래 업로드와 기존 곡 수정에서 선택할 수 있습니다.</p>
+          </div>
+          <label>
+            관리자 비밀번호
+            <input
+              type="password"
+              value={folderPassword}
+              onChange={(event) => setFolderPassword(event.target.value)}
+              autoComplete="current-password"
+              maxLength={256}
+              required
+            />
+          </label>
+          <label>
+            폴더 이름
+            <input
+              type="text"
+              value={folderName}
+              onChange={(event) => setFolderName(event.target.value)}
+              maxLength={80}
+              required
+            />
+          </label>
+          <button className="btn" disabled={!folderPassword || !folderName.trim() || uploading}>
+            {uploading ? '처리 중…' : '폴더 만들기'}
+          </button>
         </form>
       )}
 
@@ -373,6 +488,13 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
               inputMode="numeric"
               required
             />
+          </label>
+          <label>
+            폴더
+            <select value={uploadFolderId} onChange={(event) => setUploadFolderId(event.target.value)}>
+              <option value="">미분류</option>
+              {(data.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+            </select>
           </label>
           <label>
             스템 파일 (2~{data.limits.maxStems}개, WAV 4개 동시 선택 가능)
