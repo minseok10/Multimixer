@@ -5,6 +5,7 @@ import {
   fetchSongLibrary,
   formatBytes,
   groupSongsByFolder,
+  moveSongToFolder,
   updateSongMetadata,
   type Song,
   type SongLibraryData,
@@ -30,15 +31,19 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [editName, setEditName] = useState('');
   const [editBpm, setEditBpm] = useState('120');
-  const [editFolderId, setEditFolderId] = useState('');
   const [folderName, setFolderName] = useState('');
   const [folderPassword, setFolderPassword] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
+  const [moveTarget, setMoveTarget] = useState<Song | null>(null);
+  const [moveFolderId, setMoveFolderId] = useState('');
+  const [movePassword, setMovePassword] = useState('');
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Song | null>(null);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editFormRef = useRef<HTMLFormElement>(null);
+  const movePasswordRef = useRef<HTMLInputElement>(null);
   const deletePasswordRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -63,6 +68,26 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     const frame = requestAnimationFrame(() => editFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [editingSong]);
+
+  useEffect(() => {
+    if (!moveTarget) return;
+    const frame = requestAnimationFrame(() => movePasswordRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !uploading) {
+        setMoveTarget(null);
+        setMovePassword('');
+        setMoveError(null);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [moveTarget, uploading]);
 
   useEffect(() => {
     if (!deleteTarget) return;
@@ -176,6 +201,41 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     setError(null);
   };
 
+  const requestMove = (song: Song) => {
+    setMoveTarget(song);
+    setMoveFolderId(song.folderId ?? '');
+    setMovePassword('');
+    setMoveError(null);
+    setError(null);
+  };
+
+  const closeMove = () => {
+    if (uploading) return;
+    setMoveTarget(null);
+    setMovePassword('');
+    setMoveError(null);
+  };
+
+  const move = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!moveTarget || !movePassword) return;
+    const song = moveTarget;
+    setUploading(true);
+    setMoveError(null);
+    try {
+      await moveSongToFolder(movePassword, song.id, moveFolderId || null);
+      setExpandedFolders((current) => new Set(current).add(moveFolderId || 'unfiled'));
+      setMoveTarget(null);
+      setMovePassword('');
+      await load();
+    } catch (cause) {
+      setMoveError((cause as Error).message);
+      requestAnimationFrame(() => movePasswordRef.current?.select());
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const closeDelete = () => {
     if (uploading) return;
     setDeleteTarget(null);
@@ -212,7 +272,6 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     setEditingSong(song);
     setEditName(song.name);
     setEditBpm(String(song.bpm ?? 120));
-    setEditFolderId(song.folderId ?? '');
     setError(null);
   };
 
@@ -224,12 +283,10 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     setUploading(true);
     setError(null);
     try {
-      await updateSongMetadata(password, editingSong.id, editName.trim(), bpm, editFolderId || null);
-      setExpandedFolders((current) => new Set(current).add(editFolderId || 'unfiled'));
+      await updateSongMetadata(password, editingSong.id, editName.trim(), bpm);
       setEditingSong(null);
       setEditName('');
       setEditBpm('120');
-      setEditFolderId('');
       setPassword('');
       await load();
     } catch (cause) {
@@ -317,6 +374,14 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
                       {adminOpen && (
                         <div className="song-admin-actions">
                           <button
+                            className="song-move"
+                            onClick={() => requestMove(song)}
+                            disabled={uploading}
+                            aria-label={`${song.name} 폴더 이동`}
+                          >
+                            이동
+                          </button>
+                          <button
                             className="song-edit"
                             onClick={() => beginEdit(song)}
                             disabled={uploading}
@@ -364,7 +429,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
           <div className="admin-upload-heading">
             <div>
               <h3>노래 정보 수정</h3>
-              <p>스템은 그대로 두고 제목, BPM, 폴더를 수정합니다.</p>
+              <p>스템과 폴더는 그대로 두고 제목과 BPM을 수정합니다.</p>
             </div>
           </div>
           <label>
@@ -394,13 +459,6 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
               inputMode="numeric"
               required
             />
-          </label>
-          <label>
-            폴더
-            <select value={editFolderId} onChange={(event) => setEditFolderId(event.target.value)}>
-              <option value="">미분류</option>
-              {(data.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-            </select>
           </label>
           <div className="admin-edit-actions">
             <button type="button" className="btn secondary" onClick={() => {
@@ -512,6 +570,64 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
             {uploading ? uploadProgress || '업로드 중…' : `${files.length || ''}개 스템을 R2에 업로드`}
           </button>
         </form>
+      )}
+
+      {moveTarget && data && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && closeMove()}>
+          <form
+            className="move-song-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="move-song-title"
+            aria-describedby="move-song-description"
+            onSubmit={(event) => void move(event)}
+          >
+            <div className="modal-heading">
+              <div>
+                <span className="move-modal-eyebrow">MOVE SONG</span>
+                <h2 id="move-song-title">“{moveTarget.name}” 이동</h2>
+              </div>
+              <button type="button" className="modal-close" onClick={closeMove} disabled={uploading} aria-label="이동 창 닫기">×</button>
+            </div>
+
+            <p id="move-song-description" className="move-modal-copy">
+              이 노래를 넣을 폴더를 선택하세요.
+            </p>
+
+            <label className="move-folder-field">
+              이동할 폴더
+              <select value={moveFolderId} onChange={(event) => setMoveFolderId(event.target.value)}>
+                <option value="">미분류</option>
+                {(data.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+              </select>
+            </label>
+
+            <label className="move-password-field">
+              관리자 비밀번호
+              <input
+                ref={movePasswordRef}
+                type="password"
+                value={movePassword}
+                onChange={(event) => {
+                  setMovePassword(event.target.value);
+                  setMoveError(null);
+                }}
+                autoComplete="current-password"
+                maxLength={256}
+                required
+              />
+            </label>
+
+            {moveError && <div className="inline-error" role="alert">{moveError}</div>}
+
+            <div className="move-modal-actions">
+              <button type="button" className="btn secondary" onClick={closeMove} disabled={uploading}>취소</button>
+              <button className="btn" disabled={!movePassword || uploading}>
+                {uploading ? '이동 중…' : '이 폴더로 이동'}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {deleteTarget && (

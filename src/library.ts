@@ -86,15 +86,25 @@ export async function updateSongMetadata(
   songId: string,
   name: string,
   bpm: number,
-  folderId: string | null,
 ): Promise<Song> {
   const response = await fetch(`/api/admin/songs/${encodeURIComponent(songId)}`, {
     method: 'PATCH',
     headers: { Authorization: basicAuthorization(password), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, bpm, folderId }),
+    body: JSON.stringify({ name, bpm }),
   });
   const result = await response.json() as { song?: Song; error?: string };
   if (!response.ok || !result.song) throw new Error(result.error || '노래 정보를 수정하지 못했습니다.');
+  return result.song;
+}
+
+export async function moveSongToFolder(password: string, songId: string, folderId: string | null): Promise<Song> {
+  const response = await fetch(`/api/admin/songs/${encodeURIComponent(songId)}/folder`, {
+    method: 'PATCH',
+    headers: { Authorization: basicAuthorization(password), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folderId }),
+  });
+  const result = await response.json() as { song?: Song; error?: string };
+  if (!response.ok || !result.song) throw new Error(result.error || '노래를 이동하지 못했습니다.');
   return result.song;
 }
 

@@ -132,6 +132,12 @@ export default {
         return await completeSong(request, env, completeMatch[1]);
       }
 
+      const folderMoveMatch = url.pathname.match(/^\/api\/admin\/songs\/([^/]+)\/folder$/);
+      if (request.method === 'PATCH' && folderMoveMatch) {
+        await requireAdmin(request, env);
+        return await moveSongToFolder(request, env, folderMoveMatch[1]);
+      }
+
       const adminSongMatch = url.pathname.match(/^\/api\/admin\/songs\/([^/]+)$/);
       if (request.method === 'PATCH' && adminSongMatch) {
         await requireAdmin(request, env);
@@ -298,6 +304,23 @@ async function updateSongDetails(request: Request, env: Env, encodedSongId: stri
   await putManifest(env.SONGS, manifest);
   await invalidateSongListCache(request);
   console.log(JSON.stringify({ message: 'song metadata updated', id: songId, name, bpm, folderId: manifest.folderId ?? null }));
+  return json({ song: toSongDetail(manifest) });
+}
+
+async function moveSongToFolder(request: Request, env: Env, encodedSongId: string): Promise<Response> {
+  const songId = validateId(encodedSongId, '노래');
+  const body = await readJsonBody(request, 4096, '폴더 이동 정보');
+  if (!isRecord(body) || !Object.hasOwn(body, 'folderId')) {
+    throw new HttpError(400, '이동할 폴더 정보가 필요합니다.');
+  }
+  const folderId = await readFolderSelection(env.SONGS, body.folderId);
+  const manifest = await readManifest(env.SONGS, songId);
+  if (manifest.status !== 'complete') throw new HttpError(409, '공개가 완료된 노래만 이동할 수 있습니다.');
+  if (folderId) manifest.folderId = folderId;
+  else delete manifest.folderId;
+  await putManifest(env.SONGS, manifest);
+  await invalidateSongListCache(request);
+  console.log(JSON.stringify({ message: 'song moved', id: songId, folderId: manifest.folderId ?? null }));
   return json({ song: toSongDetail(manifest) });
 }
 
