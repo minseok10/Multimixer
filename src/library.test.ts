@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  collectStemRenames,
   formatMixerSongTitle,
   groupSongsByFolder,
   resolveSongFolderName,
   type Song,
   type SongFolder,
+  type SongStem,
 } from './library';
 
 const folders: SongFolder[] = [
@@ -45,6 +47,24 @@ describe('groupSongsByFolder', () => {
   it('omits 미분류 when every song belongs to a known folder', () => {
     const groups = groupSongsByFolder([song('one', 'folder-a')], folders);
     expect(groups.map(({ key }) => key)).toEqual(['folder-a', 'folder-b']);
+  });
+});
+
+describe('collectStemRenames', () => {
+  const stems: SongStem[] = [
+    { id: '0-a', name: 'song_gtr_L', fileName: 'song_gtr_L.wav', size: 10, url: '/api/songs/s/stems/0-a' },
+    { id: '1-b', name: 'Piano', fileName: 'piano.wav', size: 10, url: '/api/songs/s/stems/1-b' },
+  ];
+
+  it('returns only the stems whose trimmed name changed', () => {
+    expect(collectStemRenames(stems, { '0-a': '  Guitar  ', '1-b': 'Piano' })).toEqual([
+      { id: '0-a', name: 'Guitar' },
+    ]);
+  });
+
+  it('keeps stored names for untouched or blank entries', () => {
+    expect(collectStemRenames(stems, { '0-a': '   ' })).toEqual([]);
+    expect(collectStemRenames(stems, {})).toEqual([]);
   });
 });
 

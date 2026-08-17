@@ -82,6 +82,48 @@ export async function createSongFolder(password: string, name: string): Promise<
   return result.folder;
 }
 
+export async function deleteSongFolder(password: string, folderId: string): Promise<number> {
+  const response = await fetch(`/api/admin/folders/${encodeURIComponent(folderId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: basicAuthorization(password) },
+  });
+  const result = await response.json() as { movedSongs?: number; error?: string };
+  if (!response.ok) throw new Error(result.error || '폴더를 삭제하지 못했습니다.');
+  return result.movedSongs ?? 0;
+}
+
+export async function renameSongStem(
+  password: string,
+  songId: string,
+  stemId: string,
+  name: string,
+): Promise<SongStem> {
+  const response = await fetch(
+    `/api/admin/songs/${encodeURIComponent(songId)}/stems/${encodeURIComponent(stemId)}`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: basicAuthorization(password), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    },
+  );
+  const result = await response.json() as { stem?: SongStem; error?: string };
+  if (!response.ok || !result.stem) throw new Error(result.error || '스템 이름을 수정하지 못했습니다.');
+  return result.stem;
+}
+
+/** Trimmed, non-empty stem names that actually differ from what is stored. */
+export function collectStemRenames(
+  stems: SongStem[],
+  edited: Record<string, string>,
+): { id: string; name: string }[] {
+  const renames: { id: string; name: string }[] = [];
+  for (const stem of stems) {
+    const name = (edited[stem.id] ?? stem.name).trim();
+    if (name && name !== stem.name) renames.push({ id: stem.id, name });
+  }
+  return renames;
+}
+
 export async function updateSongMetadata(
   password: string,
   songId: string,

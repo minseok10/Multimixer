@@ -96,6 +96,12 @@ export default {
         return await createFolder(request, env);
       }
 
+      const folderMatch = url.pathname.match(/^\/api\/admin\/folders\/([^/]+)$/);
+      if (request.method === 'DELETE' && folderMatch) {
+        await requireAdmin(request, env);
+        return await deleteFolder(request, env, folderMatch[1]);
+      }
+
       const commentsMatch = url.pathname.match(/^\/api\/songs\/([^/]+)\/comments$/);
       if (commentsMatch) {
         if (request.method === 'GET') return await listComments(env, commentsMatch[1]);
@@ -124,6 +130,12 @@ export default {
       if (request.method === 'PUT' && stemUploadMatch) {
         await requireAdmin(request, env);
         return await uploadStem(request, env, url, stemUploadMatch[1], stemUploadMatch[2]);
+      }
+
+      const stemRenameMatch = url.pathname.match(/^\/api\/admin\/songs\/([^/]+)\/stems\/([^/]+)$/);
+      if (request.method === 'PATCH' && stemRenameMatch) {
+        await requireAdmin(request, env);
+        return await renameStem(request, env, stemRenameMatch[1], stemRenameMatch[2]);
       }
 
       const completeMatch = url.pathname.match(/^\/api\/admin\/songs\/([^/]+)\/complete$/);
@@ -338,6 +350,50 @@ async function createFolder(request: Request, env: Env): Promise<Response> {
   await invalidateSongListCache(request);
   console.log(JSON.stringify({ message: 'song folder created', id: folder.id, name }));
   return json({ folder }, 201);
+}
+
+async function deleteFolder(request: Request, env: Env, encodedFolderId: string): Promise<Response> {
+  const folderId = validateId(encodedFolderId, '폴더');
+  const folders = await readFolders(env.SONGS);
+  const remaining = folders.filter((folder) => folder.id !== folderId);
+  if (remaining.length === folders.length) throw new HttpError(404, '폴더를 찾을 수 없습니다.');
+  // Songs outlive their folder: unfile them first so a failure halfway through
+  // leaves the folder in place and the request can simply be retried.
+  const movedSongs = await unfileSongsInFolder(env.SONGS, folderId);
+  await putFolders(env.SONGS, remaining);
+  await invalidateSongListCache(request);
+  console.log(JSON.stringify({ message: 'song folder deleted', id: folderId, movedSongs }));
+  return json({ ok: true, movedSongs });
+}
+
+async function unfileSongsInFolder(bucket: R2Bucket, folderId: string): Promise<number> {
+  const manifests = (await listAllObjects(bucket, SONG_PREFIX, true))
+    .filter((object) => object.key.endsWith(`/${MANIFEST_FILE}`) && object.customMetadata?.folderId === folderId);
+  let moved = 0;
+  for (const object of manifests) {
+    const songId = object.key.slice(SONG_PREFIX.length, -(`/${MANIFEST_FILE}`.length));
+    const manifest = await readManifest(bucket, songId);
+    if (manifest.folderId !== folderId) continue;
+    delete manifest.folderId;
+    await putManifest(bucket, manifest);
+    moved++;
+  }
+  return moved;
+}
+
+async function renameStem(request: Request, env: Env, encodedSongId: string, encodedStemId: string): Promise<Response> {
+  const songId = validateId(encodedSongId, '노래');
+  const stemId = validateStemId(encodedStemId);
+  const body = await readJsonBody(request, 4096, '스템 정보');
+  const name = cleanText(isRecord(body) && typeof body.name === 'string' ? body.name : null, 120, '스템 이름');
+  const manifest = await readManifest(env.SONGS, songId);
+  const stem = manifest.stems.find((candidate) => candidate.id === stemId);
+  if (!stem) throw new HttpError(404, '스템을 찾을 수 없습니다.');
+  if (stem.name === name) return json({ stem });
+  stem.name = name;
+  await putManifest(env.SONGS, manifest);
+  console.log(JSON.stringify({ message: 'stem renamed', songId, stemId, name }));
+  return json({ stem });
 }
 
 async function getCreatorNote(env: Env): Promise<Response> {

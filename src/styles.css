@@ -411,6 +411,26 @@ body {
 .song-folder.expanded {
   border-color: var(--accent-dim);
 }
+.folder-header {
+  display: flex;
+  align-items: center;
+}
+.folder-header .folder-delete {
+  flex: 0 0 auto;
+  margin-right: 14px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--danger);
+  padding: 5px 9px;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.folder-header .folder-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .folder-toggle {
   width: 100%;
   border: 0;
@@ -616,6 +636,34 @@ body {
 .admin-edit-actions {
   display: flex;
   gap: 8px;
+}
+.admin-stem-names {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.admin-stem-names h4 {
+  margin: 0;
+  font-size: 14px;
+}
+.admin-stem-names p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.admin-stem-status {
+  margin-top: 10px;
+}
+.admin-stem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.admin-stem-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .delete-song-modal,
 .move-song-modal {

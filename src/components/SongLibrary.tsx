@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   basicAuthorization,
+  collectStemRenames,
   createSongFolder,
+  deleteSongFolder,
+  fetchSongDetailById,
   fetchSongLibrary,
   formatBytes,
   groupSongsByFolder,
   moveSongToFolder,
+  renameSongStem,
   updateSongMetadata,
   type Song,
+  type SongFolderGroup,
   type SongLibraryData,
+  type SongStem,
 } from '../library';
 
 interface Props {
@@ -31,6 +37,10 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [editName, setEditName] = useState('');
   const [editBpm, setEditBpm] = useState('120');
+  const [editStems, setEditStems] = useState<SongStem[]>([]);
+  const [editStemNames, setEditStemNames] = useState<Record<string, string>>({});
+  const [stemsLoading, setStemsLoading] = useState(false);
+  const [stemsError, setStemsError] = useState<string | null>(null);
   const [folderName, setFolderName] = useState('');
   const [folderPassword, setFolderPassword] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
@@ -41,10 +51,15 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<Song | null>(null);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [folderDeleteTarget, setFolderDeleteTarget] = useState<SongFolderGroup | null>(null);
+  const [folderDeletePassword, setFolderDeletePassword] = useState('');
+  const [folderDeleteError, setFolderDeleteError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editFormRef = useRef<HTMLFormElement>(null);
+  const editRequestRef = useRef(0);
   const movePasswordRef = useRef<HTMLInputElement>(null);
   const deletePasswordRef = useRef<HTMLInputElement>(null);
+  const folderDeletePasswordRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -109,6 +124,26 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     };
   }, [deleteTarget, uploading]);
 
+  useEffect(() => {
+    if (!folderDeleteTarget) return;
+    const frame = requestAnimationFrame(() => folderDeletePasswordRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !uploading) {
+        setFolderDeleteTarget(null);
+        setFolderDeletePassword('');
+        setFolderDeleteError(null);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [folderDeleteTarget, uploading]);
+
   const chooseFiles = (next: File[]) => {
     setFiles(next);
     if (next[0] && !displayName.trim()) {
@@ -124,7 +159,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       setUploadFolderId('');
       setFiles([]);
       setUploadProgress('');
-      setEditingSong(null);
+      closeEdit();
       setFolderName('');
       setFolderPassword('');
       if (inputRef.current) inputRef.current.value = '';
@@ -256,7 +291,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || '삭제에 실패했습니다.');
-      if (editingSong?.id === song.id) setEditingSong(null);
+      if (editingSong?.id === song.id) closeEdit();
       setDeleteTarget(null);
       setDeletePassword('');
       await load();
@@ -268,23 +303,53 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
     }
   };
 
-  const beginEdit = (song: Song) => {
+  const closeEdit = () => {
+    editRequestRef.current++;
+    setEditingSong(null);
+    setEditStems([]);
+    setEditStemNames({});
+    setStemsLoading(false);
+    setStemsError(null);
+  };
+
+  const beginEdit = async (song: Song) => {
+    const request = ++editRequestRef.current;
     setEditingSong(song);
     setEditName(song.name);
     setEditBpm(String(song.bpm ?? 120));
+    setEditStems([]);
+    setEditStemNames({});
+    setStemsError(null);
+    setStemsLoading(true);
     setError(null);
+    try {
+      const detail = await fetchSongDetailById(song.id);
+      if (request !== editRequestRef.current) return;
+      setEditStems(detail.stems);
+      setEditStemNames(Object.fromEntries(detail.stems.map((stem) => [stem.id, stem.name])));
+    } catch (cause) {
+      if (request !== editRequestRef.current) return;
+      setStemsError((cause as Error).message);
+    } finally {
+      if (request === editRequestRef.current) setStemsLoading(false);
+    }
   };
+
+  const stemNamesValid = editStems.every((stem) => (editStemNames[stem.id] ?? '').trim().length > 0);
 
   const saveMetadata = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!editingSong) return;
     const bpm = Number(editBpm);
-    if (!password || !editName.trim() || !Number.isInteger(bpm) || bpm < 20 || bpm > 300) return;
+    if (!password || !editName.trim() || !stemNamesValid || !Number.isInteger(bpm) || bpm < 20 || bpm > 300) return;
     setUploading(true);
     setError(null);
     try {
       await updateSongMetadata(password, editingSong.id, editName.trim(), bpm);
-      setEditingSong(null);
+      for (const rename of collectStemRenames(editStems, editStemNames)) {
+        await renameSongStem(password, editingSong.id, rename.id, rename.name);
+      }
+      closeEdit();
       setEditName('');
       setEditBpm('120');
       setPassword('');
@@ -310,6 +375,46 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
       await load();
     } catch (cause) {
       setError((cause as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const requestFolderDelete = (folder: SongFolderGroup) => {
+    setFolderDeleteTarget(folder);
+    setFolderDeletePassword('');
+    setFolderDeleteError(null);
+    setError(null);
+  };
+
+  const closeFolderDelete = () => {
+    if (uploading) return;
+    setFolderDeleteTarget(null);
+    setFolderDeletePassword('');
+    setFolderDeleteError(null);
+  };
+
+  const removeFolder = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!folderDeleteTarget || !folderDeletePassword) return;
+    const folder = folderDeleteTarget;
+    setUploading(true);
+    setFolderDeleteError(null);
+    try {
+      const movedSongs = await deleteSongFolder(folderDeletePassword, folder.key);
+      if (uploadFolderId === folder.key) setUploadFolderId('');
+      setExpandedFolders((current) => {
+        const next = new Set(current);
+        next.delete(folder.key);
+        if (movedSongs > 0) next.add('unfiled');
+        return next;
+      });
+      setFolderDeleteTarget(null);
+      setFolderDeletePassword('');
+      await load();
+    } catch (cause) {
+      setFolderDeleteError((cause as Error).message);
+      requestAnimationFrame(() => folderDeletePasswordRef.current?.select());
     } finally {
       setUploading(false);
     }
@@ -347,17 +452,30 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
           const panelId = `folder-${folder.key}`;
           return (
             <section key={folder.key} className={`song-folder${expanded ? ' expanded' : ''}`}>
-              <button
-                className="folder-toggle"
-                type="button"
-                onClick={() => toggleFolder(folder.key)}
-                aria-expanded={expanded}
-                aria-controls={panelId}
-              >
-                <span className="folder-icon" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
-                <span className="folder-name">{folder.name}</span>
-                <span className="folder-count">{folder.songs.length}곡</span>
-              </button>
+              <div className="folder-header">
+                <button
+                  className="folder-toggle"
+                  type="button"
+                  onClick={() => toggleFolder(folder.key)}
+                  aria-expanded={expanded}
+                  aria-controls={panelId}
+                >
+                  <span className="folder-icon" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+                  <span className="folder-name">{folder.name}</span>
+                  <span className="folder-count">{folder.songs.length}곡</span>
+                </button>
+                {adminOpen && folder.key !== 'unfiled' && (
+                  <button
+                    className="folder-delete"
+                    type="button"
+                    onClick={() => requestFolderDelete(folder)}
+                    disabled={uploading}
+                    aria-label={`${folder.name} 폴더 삭제`}
+                  >
+                    폴더 삭제
+                  </button>
+                )}
+              </div>
               {expanded && (
                 <div id={panelId} className="song-grid folder-song-grid">
                   {folder.songs.map((song) => (
@@ -383,7 +501,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
                           </button>
                           <button
                             className="song-edit"
-                            onClick={() => beginEdit(song)}
+                            onClick={() => void beginEdit(song)}
                             disabled={uploading}
                             aria-label={`${song.name} 정보 수정`}
                           >
@@ -429,7 +547,7 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
           <div className="admin-upload-heading">
             <div>
               <h3>노래 정보 수정</h3>
-              <p>스템과 폴더는 그대로 두고 제목과 BPM을 수정합니다.</p>
+              <p>폴더와 오디오 파일은 그대로 두고 제목, BPM, 스템 이름을 수정합니다.</p>
             </div>
           </div>
           <label>
@@ -460,12 +578,34 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
               required
             />
           </label>
+          <div className="admin-stem-names">
+            <h4>스템 이름</h4>
+            <p>믹서의 트랙 이름입니다. 업로드한 파일 이름 대신 Guitar, Piano처럼 바꿀 수 있습니다.</p>
+            {stemsLoading && <p className="admin-stem-status">스템 목록을 불러오는 중…</p>}
+            {stemsError && <div className="inline-error" role="alert">{stemsError}</div>}
+            {!stemsLoading && !stemsError && (
+              <div className="admin-stem-grid">
+                {editStems.map((stem) => (
+                  <label key={stem.id}>
+                    <span className="admin-stem-file" title={stem.fileName}>{stem.fileName}</span>
+                    <input
+                      type="text"
+                      value={editStemNames[stem.id] ?? ''}
+                      onChange={(event) => setEditStemNames((current) => ({ ...current, [stem.id]: event.target.value }))}
+                      maxLength={120}
+                      required
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="admin-edit-actions">
             <button type="button" className="btn secondary" onClick={() => {
-              setEditingSong(null);
+              closeEdit();
               setPassword('');
             }} disabled={uploading}>취소</button>
-            <button className="btn" disabled={!password || !editName.trim() || !Number.isInteger(Number(editBpm)) || Number(editBpm) < 20 || Number(editBpm) > 300 || uploading}>
+            <button className="btn" disabled={!password || !editName.trim() || !stemNamesValid || stemsLoading || !Number.isInteger(Number(editBpm)) || Number(editBpm) < 20 || Number(editBpm) > 300 || uploading}>
               {uploading ? '수정 중…' : '노래 정보 저장'}
             </button>
           </div>
@@ -674,6 +814,58 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
               <button type="button" className="btn secondary" onClick={closeDelete} disabled={uploading}>취소</button>
               <button className="btn delete-confirm" disabled={!deletePassword || uploading}>
                 {uploading ? '삭제 중…' : '노래 삭제'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {folderDeleteTarget && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && closeFolderDelete()}>
+          <form
+            className="delete-song-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-folder-title"
+            aria-describedby="delete-folder-description"
+            onSubmit={(event) => void removeFolder(event)}
+          >
+            <div className="modal-heading">
+              <div>
+                <span className="delete-modal-eyebrow">DELETE FOLDER</span>
+                <h2 id="delete-folder-title">“{folderDeleteTarget.name}” 폴더 삭제</h2>
+              </div>
+              <button type="button" className="modal-close" onClick={closeFolderDelete} disabled={uploading} aria-label="폴더 삭제 창 닫기">×</button>
+            </div>
+
+            <p id="delete-folder-description" className="delete-modal-copy">
+              {folderDeleteTarget.songs.length > 0
+                ? `폴더만 삭제되고 안에 있던 ${folderDeleteTarget.songs.length}곡은 미분류로 옮겨집니다. 노래와 스템은 지워지지 않습니다.`
+                : '빈 폴더를 삭제합니다. 이 작업은 되돌릴 수 없습니다.'}
+            </p>
+
+            <label className="delete-password-field">
+              관리자 비밀번호
+              <input
+                ref={folderDeletePasswordRef}
+                type="password"
+                value={folderDeletePassword}
+                onChange={(event) => {
+                  setFolderDeletePassword(event.target.value);
+                  setFolderDeleteError(null);
+                }}
+                autoComplete="current-password"
+                maxLength={256}
+                required
+              />
+            </label>
+
+            {folderDeleteError && <div className="inline-error" role="alert">{folderDeleteError}</div>}
+
+            <div className="delete-modal-actions">
+              <button type="button" className="btn secondary" onClick={closeFolderDelete} disabled={uploading}>취소</button>
+              <button className="btn delete-confirm" disabled={!folderDeletePassword || uploading}>
+                {uploading ? '삭제 중…' : '폴더 삭제'}
               </button>
             </div>
           </form>
