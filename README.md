@@ -166,3 +166,17 @@ npx wrangler r2 bucket create multimixer-songs
 npx wrangler secret put ADMIN_PASSWORD
 npm run deploy
 ```
+
+### GitHub Actions 자동 배포
+
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)이 `main` 푸시마다 타입 검사 →
+테스트 → 빌드 → `wrangler deploy`를 실행합니다(Pull Request에서는 검사만 하고 배포는 건너뜁니다).
+저장소 **Settings → Secrets and variables → Actions**에 다음 값을 등록해야 동작합니다.
+
+| Secret | 설명 |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Workers Scripts 편집 + 해당 계정의 R2 권한을 가진 API 토큰 |
+| `CLOUDFLARE_ACCOUNT_ID` | 토큰이 여러 계정에 접근할 수 있을 때 필요 (단일 계정이면 생략 가능) |
+
+`ADMIN_PASSWORD`는 Worker Secret이라 GitHub이 아니라 `wrangler secret put`으로 한 번만
+설정합니다. 배포 자체는 이 값을 건드리지 않습니다.
