@@ -1,3 +1,5 @@
+import { instrumentName } from './stemNames.js';
+
 export interface Song {
   id: string;
   name: string;
@@ -109,6 +111,59 @@ export async function renameSongStem(
   const result = await response.json() as { stem?: SongStem; error?: string };
   if (!response.ok || !result.stem) throw new Error(result.error || '스템 이름을 수정하지 못했습니다.');
   return result.stem;
+}
+
+export interface StemCleanupChange {
+  songId: string;
+  songName: string;
+  stemId: string;
+  from: string;
+  to: string;
+  /** 같은 곡에서 이 이름이 둘 이상 생기는 경우 — 트랙 구분이 안 되니 눈에 띄게 알린다. */
+  duplicate: boolean;
+}
+
+export interface StemCleanupSkip {
+  songId: string;
+  songName: string;
+  name: string;
+}
+
+export interface StemCleanupPlan {
+  changes: StemCleanupChange[];
+  skipped: StemCleanupSkip[];
+}
+
+/**
+ * 이미 불러온 노래 상세들에서 "악기 이름만 남기기" 계획을 만든다.
+ * 실제 요청은 보내지 않으며, 확신이 없는 스템은 skipped로 넘긴다.
+ */
+export function planStemCleanup(details: SongDetail[]): StemCleanupPlan {
+  const changes: StemCleanupChange[] = [];
+  const skipped: StemCleanupSkip[] = [];
+
+  for (const song of details) {
+    const resolved = song.stems.map((stem) => ({ stem, next: instrumentName(stem.name) }));
+    const counts = new Map<string, number>();
+    for (const { stem, next } of resolved) {
+      if (next && next !== stem.name) counts.set(next, (counts.get(next) ?? 0) + 1);
+    }
+    for (const { stem, next } of resolved) {
+      if (!next) {
+        skipped.push({ songId: song.id, songName: song.name, name: stem.name });
+      } else if (next !== stem.name) {
+        changes.push({
+          songId: song.id,
+          songName: song.name,
+          stemId: stem.id,
+          from: stem.name,
+          to: next,
+          duplicate: (counts.get(next) ?? 0) > 1,
+        });
+      }
+    }
+  }
+  return { changes, skipped };
 }
 
 /** Trimmed, non-empty stem names that actually differ from what is stored. */
