@@ -143,6 +143,20 @@ docs/           # Claude Code ↔ Codex 협업 가이드
 R2 manifest의 표시 제목과 BPM, 그리고 **스템 이름**을 변경할 수 있습니다. 스템 이름은 처음에는
 업로드한 파일 이름을 따르지만, 여기에서 Guitar·Piano처럼 바꾸면 믹서의 트랙 이름도 함께 바뀝니다.
 
+이미 올라간 스템 이름을 한 번에 정리하려면
+[`scripts/rename-stems.mjs`](scripts/rename-stems.mjs)를 사용합니다. `제목 [영상ID] (Vocals)`
+같은 이름에서 악기 부분만 남깁니다. 기본은 미리보기라 아무것도 바꾸지 않고, 확인한 뒤
+`--apply`를 붙이면 반영됩니다.
+
+```bash
+node scripts/rename-stems.mjs                          # 미리보기
+ADMIN_PASSWORD='...' node scripts/rename-stems.mjs --apply
+node scripts/rename-stems.mjs --base http://localhost:8787 --song <노래 ID>
+```
+
+악기 이름을 확실히 알아내지 못한 스템은 건드리지 않고 "건너뜀"으로 보고하며, 한 곡에서 같은
+이름이 둘 이상 나오면 경고를 표시합니다.
+
 폴더 헤더의 **폴더 삭제** 버튼은 폴더만 지웁니다. 안에 있던 노래는 삭제되지 않고 각 manifest의
 `folderId`가 지워지면서 **미분류**로 옮겨집니다. 위 작업에는 모두 `ADMIN_PASSWORD`가 필요합니다.
 
