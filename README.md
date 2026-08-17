@@ -32,7 +32,8 @@
 - **Custom Upload**를 누르면 내 컴퓨터의 오디오 파일을 여러 개 선택하거나 화면에 끌어다 놓을 수 있습니다.
 
 상단의 **제작자 코멘트**에서는 개발 과정과 곡에 관한 글을 볼 수 있고, GitHub 버튼은 이 저장소를
-새 탭에서 엽니다. **노래 관리**는 관리자용 업로드·수정·삭제 화면입니다.
+새 탭에서 엽니다. **노래 관리**는 관리자용 업로드·수정·삭제 화면이며, 폴더 만들기와 폴더 삭제,
+곡 정보와 스템 이름 수정도 여기에서 합니다.
 
 ### 2. 재생과 믹싱
 
@@ -139,7 +140,11 @@ docs/           # Claude Code ↔ Codex 협업 가이드
 
 공개된 노래는 `/songs/{노래 ID}` 주소를 가지므로 직접 링크, 새로고침, 브라우저 앞/뒤 이동 후에도
 같은 믹서 화면을 복원합니다. 관리 화면의 각 노래에 있는 **수정** 버튼으로 스템 재업로드 없이
-R2 manifest의 표시 제목과 BPM을 변경할 수 있으며, 이 작업에도 `ADMIN_PASSWORD`가 필요합니다.
+R2 manifest의 표시 제목과 BPM, 그리고 **스템 이름**을 변경할 수 있습니다. 스템 이름은 처음에는
+업로드한 파일 이름을 따르지만, 여기에서 Guitar·Piano처럼 바꾸면 믹서의 트랙 이름도 함께 바뀝니다.
+
+폴더 헤더의 **폴더 삭제** 버튼은 폴더만 지웁니다. 안에 있던 노래는 삭제되지 않고 각 manifest의
+`folderId`가 지워지면서 **미분류**로 옮겨집니다. 위 작업에는 모두 `ADMIN_PASSWORD`가 필요합니다.
 
 상단의 **제작자 코멘트**도 같은 R2 버킷에 저장되며, 공개 열람은 가능하지만 편집은
 `ADMIN_PASSWORD`가 있어야 합니다. R2에 공개된 노래를 믹서에서 열면 곡별 익명 댓글이 표시됩니다.
@@ -161,3 +166,17 @@ npx wrangler r2 bucket create multimixer-songs
 npx wrangler secret put ADMIN_PASSWORD
 npm run deploy
 ```
+
+### GitHub Actions 자동 배포
+
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)이 `main` 푸시마다 타입 검사 →
+테스트 → 빌드 → `wrangler deploy`를 실행합니다(Pull Request에서는 검사만 하고 배포는 건너뜁니다).
+저장소 **Settings → Secrets and variables → Actions**에 다음 값을 등록해야 동작합니다.
+
+| Secret | 설명 |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Workers Scripts 편집 + 해당 계정의 R2 권한을 가진 API 토큰 |
+| `CLOUDFLARE_ACCOUNT_ID` | 토큰이 여러 계정에 접근할 수 있을 때 필요 (단일 계정이면 생략 가능) |
+
+`ADMIN_PASSWORD`는 Worker Secret이라 GitHub이 아니라 `wrangler secret put`으로 한 번만
+설정합니다. 배포 자체는 이 값을 건드리지 않습니다.
