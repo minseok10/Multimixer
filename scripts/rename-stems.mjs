@@ -7,6 +7,9 @@
  * 기본은 미리보기(dry run)라 아무것도 바꾸지 않습니다. 목록을 확인한 뒤
  * --apply를 붙여 실제로 반영하세요.
  *
+ * 이름 판정 규칙은 관리 화면의 "스템 이름 일괄 정리" 버튼과 같은 모듈
+ * (src/stemNames.js)을 쓴다.
+ *
  * 사용법:
  *   node scripts/rename-stems.mjs                       # 미리보기
  *   ADMIN_PASSWORD=... node scripts/rename-stems.mjs --apply
@@ -14,44 +17,9 @@
  *   node scripts/rename-stems.mjs --song <노래 ID>       # 한 곡만
  */
 
+import { instrumentName } from '../src/stemNames.js';
+
 const DEFAULT_BASE = 'https://mix.minseok.site';
-
-// 파일명 꼬리표로 흔히 붙는 악기 이름. 표기(대소문자·복수형)는 이 목록으로 통일한다.
-const INSTRUMENTS = [
-  'Vocals', 'Vocal', 'Drums', 'Drum', 'Bass', 'Guitar', 'Guitars', 'Piano', 'Keys',
-  'Keyboard', 'Synth', 'Strings', 'Brass', 'Perc', 'Percussion', 'Other', 'Inst', 'MR',
-  'Chorus', 'Pad', 'Arp', 'Lead', 'FX', 'Click',
-];
-const CANONICAL = new Map(INSTRUMENTS.map((name) => [name.toLowerCase(), name]));
-
-/**
- * 스템 이름에서 악기 부분만 뽑아낸다. 확신이 없으면 null(=건너뜀)을 준다.
- */
-export function instrumentName(stemName) {
-  const trimmed = stemName.trim();
-
-  // 1순위: 맨 뒤 괄호 — "제목 [id] (Vocals)" 형태
-  const parenthesized = trimmed.match(/\(([^()]+)\)\s*$/);
-  if (parenthesized) return canonicalize(parenthesized[1].trim());
-
-  // 2순위: 구분자로 끝에 붙은 악기 이름 — "제목_drums", "제목 - Bass"
-  const suffix = trimmed.match(/[-_ ]([A-Za-z]+)\s*$/);
-  if (suffix) {
-    const canonical = CANONICAL.get(suffix[1].toLowerCase());
-    if (canonical) return canonical;
-  }
-
-  // 3순위: 이름 전체가 이미 악기 이름 (표기만 정리)
-  const whole = CANONICAL.get(trimmed.toLowerCase());
-  if (whole) return whole;
-
-  return null;
-}
-
-function canonicalize(value) {
-  if (!value) return null;
-  return CANONICAL.get(value.toLowerCase()) ?? value;
-}
 
 function parseArgs(argv) {
   const options = { base: DEFAULT_BASE, apply: false, song: null };

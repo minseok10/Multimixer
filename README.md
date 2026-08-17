@@ -143,10 +143,13 @@ docs/           # Claude Code ↔ Codex 협업 가이드
 R2 manifest의 표시 제목과 BPM, 그리고 **스템 이름**을 변경할 수 있습니다. 스템 이름은 처음에는
 업로드한 파일 이름을 따르지만, 여기에서 Guitar·Piano처럼 바꾸면 믹서의 트랙 이름도 함께 바뀝니다.
 
-이미 올라간 스템 이름을 한 번에 정리하려면
-[`scripts/rename-stems.mjs`](scripts/rename-stems.mjs)를 사용합니다. `제목 [영상ID] (Vocals)`
-같은 이름에서 악기 부분만 남깁니다. 기본은 미리보기라 아무것도 바꾸지 않고, 확인한 뒤
-`--apply`를 붙이면 반영됩니다.
+이미 올라간 스템 이름은 관리 화면의 **스템 이름 일괄 정리 → 변경 내역 보기**로 한 번에
+정리할 수 있습니다. `제목 [영상ID] (Vocals)` 같은 이름에서 악기 부분만 남기며, 무엇이
+어떻게 바뀌는지 목록으로 먼저 보여주고 관리자 비밀번호를 확인한 뒤에만 적용합니다.
+
+같은 작업을 CLI로도 할 수 있습니다 — [`scripts/rename-stems.mjs`](scripts/rename-stems.mjs).
+판정 규칙은 화면과 같은 모듈([`src/stemNames.js`](src/stemNames.js))을 씁니다. 기본은
+미리보기라 아무것도 바꾸지 않고, 확인한 뒤 `--apply`를 붙이면 반영됩니다.
 
 ```bash
 node scripts/rename-stems.mjs                          # 미리보기

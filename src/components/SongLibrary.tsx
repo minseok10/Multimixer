@@ -16,6 +16,7 @@ import {
   type SongLibraryData,
   type SongStem,
 } from '../library';
+import { StemNameCleanup } from './StemNameCleanup';
 
 interface Props {
   busy: boolean;
@@ -610,6 +611,10 @@ export function SongLibrary({ busy, onSelectSong, onCustomUpload }: Props) {
             </button>
           </div>
         </form>
+      )}
+
+      {adminOpen && data && !editingSong && (
+        <StemNameCleanup disabled={uploading} onApplied={load} />
       )}
 
       {adminOpen && data && !editingSong && (

@@ -3,8 +3,10 @@ import {
   collectStemRenames,
   formatMixerSongTitle,
   groupSongsByFolder,
+  planStemCleanup,
   resolveSongFolderName,
   type Song,
+  type SongDetail,
   type SongFolder,
   type SongStem,
 } from './library';
@@ -65,6 +67,47 @@ describe('collectStemRenames', () => {
   it('keeps stored names for untouched or blank entries', () => {
     expect(collectStemRenames(stems, { '0-a': '   ' })).toEqual([]);
     expect(collectStemRenames(stems, {})).toEqual([]);
+  });
+});
+
+describe('planStemCleanup', () => {
+  function detail(id: string, stems: string[]): SongDetail {
+    return {
+      ...song(id),
+      stems: stems.map((name, index) => ({
+        id: `${index}-${id}`, name, fileName: `${name}.wav`, size: 1, url: `/api/songs/${id}/stems/${index}`,
+      })),
+    };
+  }
+
+  it('keeps only the instrument name and leaves already clean stems alone', () => {
+    const plan = planStemCleanup([
+      detail('a', ["Can't Be Right [68aA_o4yGwo] (Vocals)", "Can't Be Right [68aA_o4yGwo] (Drums)"]),
+      detail('b', ['Vocals', 'Drums']),
+    ]);
+
+    expect(plan.changes.map(({ from, to }) => `${from} → ${to}`)).toEqual([
+      "Can't Be Right [68aA_o4yGwo] (Vocals) → Vocals",
+      "Can't Be Right [68aA_o4yGwo] (Drums) → Drums",
+    ]);
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it('reads suffixes and normalizes casing, skipping names it cannot resolve', () => {
+    const plan = planStemCleanup([detail('a', ['여름밤_drums', '여름밤 - Bass', 'piano', 'mix_take3'])]);
+
+    expect(plan.changes.map(({ to }) => to)).toEqual(['Drums', 'Bass', 'Piano']);
+    expect(plan.skipped.map(({ name }) => name)).toEqual(['mix_take3']);
+  });
+
+  it('flags stems that would collide inside one song', () => {
+    const plan = planStemCleanup([detail('a', ['X [id] (Vocals)', 'Y [id] (Vocals)', 'Z [id] (Bass)'])]);
+
+    expect(plan.changes.map(({ to, duplicate }) => ({ to, duplicate }))).toEqual([
+      { to: 'Vocals', duplicate: true },
+      { to: 'Vocals', duplicate: true },
+      { to: 'Bass', duplicate: false },
+    ]);
   });
 });
 
