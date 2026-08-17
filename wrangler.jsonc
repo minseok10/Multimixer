@@ -4,6 +4,12 @@
   "main": "./worker/index.ts",
   "compatibility_date": "2026-07-12",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "mix.minseok.site",
+      "custom_domain": true
+    }
+  ],
   "secrets": {
     "required": ["ADMIN_PASSWORD"]
   },
